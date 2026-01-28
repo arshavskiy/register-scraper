@@ -1,7 +1,7 @@
-import { chromium } from 'playwright';
+import {chromium} from 'playwright';
 import fs from 'fs';
 import * as cheerio from 'cheerio';
-import { performance } from 'perf_hooks';
+import {performance} from 'perf_hooks';
 import dotenv from 'dotenv';
 
 // Load environment variables from .env file
@@ -12,16 +12,17 @@ dotenv.config();
 // ============================================================================
 
 const CONFIG = {
-    baseUrl: 'https://ariregister.rik.ee',
-    searchUrl: 'https://ariregister.rik.ee/eng',
-    dataFolder: './data',
-    browserOptions: { headless: true },
+    baseUrl: process.env.BASE_URL || 'https://ariregister.rik.ee',
+    searchUrl: process.env.SEARCH_URL || 'https://ariregister.rik.ee/eng',
+    dataFolder: process.env.DATA_FOLDER || './data',
+    browserOptions: {headless: process.env.BROWSER_HEADLESS !== 'false'},
     selectors: {
-        searchInput: 'input#company_search',
-        searchButton: 'button[type="submit"]',
-        resultRow: 'table tbody tr',
+        searchInput: process.env.SELECTOR_SEARCH_INPUT || 'input#company_search',
+        searchButton: process.env.SELECTOR_SEARCH_BUTTON || 'button[type="submit"]',
+        resultRow: process.env.SELECTOR_RESULT_ROW || 'table tbody tr',
     },
-    wantedSections: [
+    userAgent: process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    wantedSections: process.env.WANTED_SECTIONS.split(" ") || [
         'General information',
         'VAT information',
         'Right of representation',
@@ -47,7 +48,7 @@ function getTodayDate() {
 
 function createFolderIfNotExists(folderPath) {
     if (!fs.existsSync(folderPath)) {
-        fs.mkdirSync(folderPath, { recursive: true });
+        fs.mkdirSync(folderPath, {recursive: true});
     }
 }
 
@@ -67,7 +68,7 @@ function getOutputFolder() {
 // ============================================================================
 
 async function navigateToSearchPage(page) {
-    await page.goto(CONFIG.searchUrl, { waitUntil: 'networkidle' });
+    await page.goto(CONFIG.searchUrl, {waitUntil: 'networkidle'});
 }
 
 async function searchForCompany(page, companyName) {
@@ -153,7 +154,7 @@ function extractLinks($, container) {
         const href = normalizeUrl($(a).attr('href') || '');
         
         if (href) {
-            links.push({ text, href });
+            links.push({text, href});
         }
     });
     
@@ -241,7 +242,9 @@ function printExtractionStatus(foundTitles, wantedSections) {
 
 async function searchCompany(companyName) {
     const browser = await chromium.launch(CONFIG.browserOptions);
-    const page = await browser.newPage();
+    const page = await browser.newPage({
+        userAgent: CONFIG.userAgent,
+    });
     
     try {
         // Navigate and search
@@ -263,7 +266,7 @@ async function searchCompany(companyName) {
         printExtractionStatus(foundTitles, CONFIG.wantedSections);
         
         // Prepare and save results
-        const results = [{ name: companyName }, ...sections];
+        const results = [{name: companyName}, ...sections];
         const jsonPath = `${folderPath}/${companyName}.json`;
         saveJsonFile(jsonPath, results);
         
