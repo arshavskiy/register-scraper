@@ -33,7 +33,7 @@ A Node.js web scraper that extracts company information from the Estonian Busine
 1. **Clone the repository**
 ```bash
 git clone <your-repo-url>
-cd crowler-buss
+cd register-crawler
 ```
 
 2. **Install dependencies**
