@@ -169,7 +169,7 @@ function getTodayDate() {
 }
 
 function getOutputFolder() {
-  const dataFolder = process.env.DATA_FOLDER || "./data";
+  const dataFolder = process.env.DATA_FOLDER || "../data";
   const folderPath = path.join(dataFolder, getTodayDate());
   if (!fs.existsSync(folderPath)) {
     fs.mkdirSync(folderPath, { recursive: true });
@@ -257,10 +257,15 @@ async function scrapeByUrl(url) {
 
   try {
     await page.goto(url, { waitUntil: "networkidle" });
-    await acceptCookiesIfPresent(page);
 
+    // Capture title before accepting cookies — accepting triggers a full page reload
     const pageTitle = await page.title();
     const companyName = pageTitle.split("|")[0].trim();
+
+    await acceptCookiesIfPresent(page);
+    // After cookie acceptance the page reloads — wait for company content to appear
+    await page.waitForSelector(".card-body", { timeout: 15000 });
+    await page.waitForLoadState("networkidle");
 
     const html = await page.content();
     const sections = extractAllSections(html, config.wantedSections, config.baseUrl);
