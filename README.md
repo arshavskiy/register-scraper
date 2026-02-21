@@ -1,252 +1,297 @@
-# Estonian Business Register Crawler
+# Estonian Business Register — API Server
 
-A Node.js web scraper that extracts company information from the Estonian Business Register (ariregister.rik.ee).
+A Node.js REST API that wraps the Estonian Business Register scraper and exposes it over HTTP. Designed to run behind a **Caddy** reverse proxy.
 
-## 🚀 Features
+---
 
-- ✅ Automated company data extraction
-- ✅ Modular and functional code architecture
-- ✅ Configurable via environment variables
-- ✅ Full-page screenshot capture
-- ✅ JSON output with structured data
-- ✅ Extracts 12 key sections including:
-  - General information
-  - VAT information
-  - Right of representation
-  - Contacts
-  - Shareholders
-  - Tax information
-  - Activity licenses
-  - Annual reports
-  - Areas of activity
-  - Articles of association
-  - Beneficial owners
-  - Data protection officer
+## Stack
 
-## 📋 Prerequisites
+| Layer | Technology |
+|---|---|
+| Runtime | Node.js |
+| Language | JavaScript (CommonJS) |
+| HTTP server | Express |
+| Browser automation | Playwright (Chromium) |
+| HTML parsing | Cheerio |
+| Reverse proxy | Caddy |
 
-- Node.js 16.x or higher
-- npm or yarn
+---
 
-## 🛠️ Installation
+## Project Structure
 
-1. **Clone the repository**
-```bash
-git clone <your-repo-url>
-cd register-crawler
+```
+server/
+├── src/
+│   ├── index.js          # Express app entry point
+│   ├── scraper.js        # Playwright + Cheerio scraping logic
+│   └── routes/
+│       └── company.js    # POST /getCompanyByNameOrNumber, POST /getCompleteInfo
+├── package.json
+├── Caddyfile
+└── .env.example
+
+# Output is written to the shared project data folder:
+../data/
+└── YYYY-MM-DD/
+    ├── CompanyName.jpg   ← full-page screenshot
+    └── CompanyName.json  ← structured JSON result
 ```
 
-2. **Install dependencies**
+---
+
+## Setup
+
+### 1. Install dependencies
+
 ```bash
+cd server
 npm install
 ```
 
-3. **Configure environment variables**
+### 2. Install Playwright browser
+
+```bash
+npx playwright install chromium
+```
+
+### 3. Configure environment
+
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` to customize your configuration (optional - defaults work out of the box).
+Edit `.env` as needed — defaults work out of the box.
 
-## 🎯 Usage
+---
 
-### Basic Usage
+## Running
 
-Search for a company by name:
-
-```bash
-node searchCompany.js "BOLT OPERATIONS OÜ"
-```
-
-### Output
-
-The script generates:
-- **Screenshot**: `./data/YYYY-MM-DD/CompanyName.jpg`
-- **JSON Data**: `./data/YYYY-MM-DD/CompanyName.json`
-
-### Example Output
-
-```
-Searching for: BOLT OPERATIONS OÜ
-
-📋 Section extraction status:
-☑ General information
-☑ VAT information
-☑ Right of representation
-☑ Contacts
-☑ Shareholders
-☑ Tax information
-☑ Activity licenses and notices of economic activities
-☑ Annual reports
-☑ Areas of activity
-☑ Articles of association
-☑ Beneficial owners
-☑ Data protection officer
-
-Found: 12/12 sections
-
-Execution time: 3542.67ms (3.54s)
-```
-
-## ⚙️ Configuration
-
-All configuration is managed through the `.env` file:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BASE_URL` | `https://ariregister.rik.ee` | Base URL for the registry |
-| `SEARCH_URL` | `https://ariregister.rik.ee/eng` | Search page URL |
-| `DATA_FOLDER` | `./data` | Output folder for extracted data |
-| `BROWSER_HEADLESS` | `true` | Run browser in headless mode |
-| `SELECTOR_SEARCH_INPUT` | `input#company_search` | CSS selector for search input |
-| `SELECTOR_SEARCH_BUTTON` | `button[type="submit"]` | CSS selector for search button |
-| `SELECTOR_RESULT_ROW` | `table tbody tr` | CSS selector for result rows |
-| `WANTED_SECTIONS` | (see .env) | Comma-separated list of sections to extract |
-
-### Example .env Configuration
+### Development (auto-restart on file change)
 
 ```bash
-# Run in visible browser mode for debugging
-BROWSER_HEADLESS=false
-
-# Change output folder
-DATA_FOLDER=./output
-
-# Extract only specific sections
-WANTED_SECTIONS=General information,Contacts,Shareholders
+npm run dev
 ```
 
-## 📂 Project Structure
+### Production
 
-```
-crowler-buss/
-├── .env                    # Environment configuration (gitignored)
-├── .env.example            # Environment template
-├── .gitignore              # Git ignore rules
-├── package.json            # Node.js dependencies
-├── searchCompany.js        # Main application
-├── README.md               # This file
-└── data/                   # Output folder (gitignored)
-    └── YYYY-MM-DD/
-        ├── CompanyName.jpg
-        └── CompanyName.json
+```bash
+npm start
 ```
 
-## 🏗️ Architecture
+### With Caddy (reverse proxy)
 
-The application is built with a modular, functional architecture:
+Run the Node server, then in a separate terminal:
 
-### Modules
+```bash
+caddy run --config Caddyfile
+```
 
-1. **Configuration** - Environment-based config management
-2. **File System Utilities** - Folder creation, JSON saving
-3. **Browser Navigation** - Page navigation and interaction
-4. **HTML Extraction** - Data parsing with Cheerio
-5. **Reporting** - Status logging and progress tracking
-6. **Main Orchestration** - Coordinates all modules
+For automatic HTTPS, replace `:80` in `Caddyfile` with your domain:
 
-### Key Technologies
+```
+api.example.com {
+    reverse_proxy localhost:3000
+}
+```
 
-- **Playwright** - Browser automation
-- **Cheerio** - HTML parsing (jQuery-like API)
-- **dotenv** - Environment variable management
-- **ES Modules** - Modern JavaScript imports
+---
 
-## 📊 Output Format
+## API Reference
 
-### JSON Structure
+### Health check
+
+```
+GET /health
+```
+
+**Response**
+
+```json
+{ "status": "ok", "timestamp": "2026-02-21T10:00:00.000Z" }
+```
+
+---
+
+### POST /getCompanyByNameOrNumber
+
+Search the Estonian Business Register by company name or registry code. Returns a list of matching companies.
+
+**Request**
+
+```http
+POST /getCompanyByNameOrNumber
+Content-Type: application/json
+
+{
+  "jurisdiction_code": "ee",
+  "company_name": "BOLT OPERATIONS OÜ"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `jurisdiction_code` | string | No | ISO 3166-1 alpha-2 country code (default: `"ee"`) |
+| `company_name` | string | One of these | Company name to search |
+| `company_number` | string | One of these | Registry code to search |
+
+At least one of `company_name` or `company_number` must be provided. If both are given, `company_name` takes precedence.
+
+**Response — 200 OK**
 
 ```json
 [
   {
-    "name": "BOLT OPERATIONS OÜ"
-  },
-  {
-    "title": "General information",
-    "fields": {
-      "Registry code": "14532901",
-      "Legal form": "Private limited company",
-      "Status": "Entered into the register",
-      "Capital": "Capital is 2 701 €",
-      "Registered": "25.07.2018"
-    },
-    "content": "Full text content of the section...",
-    "links": [
-      {
-        "text": "PDF",
-        "href": "https://ariregister.rik.ee/eng/company/14532901/file/9013151607"
-      }
-    ]
+    "jurisdiction_code": "ee",
+    "company_name": "Bolt Operations OÜ",
+    "company_number": "14532901",
+    "address": "Harju maakond, Tallinn, Kesklinna linnaosa, Vana-Lõuna tn 15, 10134",
+    "status": "Entered into the register (25.07.2018)",
+    "url": "https://ariregister.rik.ee/eng/company/14532901/..."
   }
 ]
 ```
 
-### Data Structure
+**Response — 404 Not Found**
 
-Each section contains:
-- **title**: Section name
-- **fields**: Key-value pairs (label → value)
-- **content**: Full text content
-- **links**: Array of { text, href } objects (relative URLs converted to absolute)
-
-## 🐛 Debugging
-
-### Run in visible browser mode
-
-```bash
-# In .env
-BROWSER_HEADLESS=false
+```json
+{ "error": "No companies found.", "query": "..." }
 ```
-
-### View extraction status
-
-The script automatically prints a checkbox list showing which sections were found.
-
-### Common Issues
-
-**Problem**: "Company name is required" error
-```bash
-# Solution: Wrap company name in quotes
-node searchCompany.js "BOLT OPERATIONS OÜ"
-```
-
-**Problem**: Some sections not found
-- Check if the company page structure has changed
-- Update selectors in `.env` if needed
-- Verify `WANTED_SECTIONS` spelling matches page exactly
-
-## 🔒 Security
-
-- `.env` file is gitignored (contains potentially sensitive configuration)
-- Output data folder is gitignored (may contain company information)
-- Use `.env.example` as a template for team sharing
-
-## 📝 License
-
-ISC
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📧 Support
-
-For issues or questions, please open an issue on GitHub.
-
-## 🎯 Roadmap
-
-- [ ] Add TypeScript support
-- [ ] Add unit tests
-- [ ] Support batch company searches
-- [ ] Add retry logic for failed requests
-- [ ] Export to CSV/Excel format
-- [ ] Add CLI progress bar
-- [ ] Support multiple languages (EST/ENG/RUS)
 
 ---
 
-Made with ❤️ for Estonian business data extraction
+### POST /getCompleteInfo
+
+Navigate directly to a company detail page by URL. Extracts structured data, saves a full-page screenshot and a JSON file to `../data/YYYY-MM-DD/`.
+
+**Request**
+
+```http
+POST /getCompleteInfo
+Content-Type: application/json
+
+{
+  "jurisdiction_code": "ee",
+  "url": "https://ariregister.rik.ee/eng/company/14532901/Bolt-Operations-O%C3%9C"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `jurisdiction_code` | string | No | ISO 3166-1 alpha-2 country code (default: `"ee"`) |
+| `url` | string | Yes | Full URL of the company detail page |
+
+> Tip: get the URL from `POST /getCompanyByNameOrNumber` → `results[n].url`
+
+**Response — 200 OK**
+
+```json
+{
+  "company_name": "Bolt Operations OÜ",
+  "company_number": "14532901",
+  "jurisdiction_ident": "EE102090374",
+  "incorporation_date": "25.07.2018",
+  "dissolution_date": "",
+  "company_type": "Private limited company",
+  "current_status": "Entered into the register",
+  "more_info_available": true,
+  "ultimate_beneficial_owners": [
+    {
+      "name": "Markus Villig",
+      "position": null,
+      "entityType": null,
+      "type_of_control": "Control or influence through other means (contractual, family relations etc)"
+    }
+  ],
+  "officers": [
+    {
+      "name": "Ahto Kink",
+      "position": "Management board member",
+      "entityType": null
+    },
+    {
+      "name": "Vincent Roland Pickering",
+      "position": "Management board member",
+      "entityType": null
+    }
+  ],
+  "shareholders": [
+    {
+      "name": "Omanikukonto: Bolt Holdings OÜ",
+      "shares": "100.00%",
+      "shareCount": null,
+      "entityType": null,
+      "type_of_control": "Sole ownership"
+    }
+  ]
+}
+```
+
+**Saved files**
+
+Every successful call writes two files to the shared project data folder:
+
+```
+../data/
+└── 2026-02-21/
+    ├── Bolt Operations OÜ.jpg    ← full-page screenshot
+    └── Bolt Operations OÜ.json  ← structured JSON result
+```
+
+---
+
+## Typical two-step workflow
+
+```bash
+# Step 1 — find the company and get its URL
+printf '{"jurisdiction_code":"ee","company_name":"BOLT OPERATIONS O\xc3\x9c"}' > search.json
+curl -X POST http://localhost:3000/getCompanyByNameOrNumber \
+     -H "Content-Type: application/json; charset=utf-8" \
+     -d @search.json
+
+# Step 2 — fetch full details using the URL from step 1
+printf '{"jurisdiction_code":"ee","url":"https://ariregister.rik.ee/eng/company/14532901/Bolt-Operations-O%%C3%%9C"}' > detail.json
+curl -X POST http://localhost:3000/getCompleteInfo \
+     -H "Content-Type: application/json; charset=utf-8" \
+     -d @detail.json
+```
+
+> On Windows (Git Bash), write the payload to a file using `printf` to preserve UTF-8 encoding, then pass the file with `-d @file`.
+
+---
+
+## Configuration
+
+All options are set via `.env`:
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `3000` | HTTP port the server listens on |
+| `BASE_URL` | `https://ariregister.rik.ee` | Registry base URL |
+| `SEARCH_URL` | `https://ariregister.rik.ee/eng` | Search page URL |
+| `DATA_FOLDER` | `../data` | Output folder for screenshots and JSON |
+| `BROWSER_HEADLESS` | `true` | Set to `false` to watch the browser |
+| `USER_AGENT` | Chrome 131 UA string | Browser user agent |
+| `SELECTOR_SEARCH_INPUT` | `input#company_search` | Search field selector |
+| `SELECTOR_SEARCH_BUTTON` | `button.btn-search` | Search submit button selector |
+| `WANTED_SECTIONS` | all 12 sections | Comma-separated list of sections to extract |
+| `FIELD_REGISTRY_CODE` | `Registry code` | Label for the company number field |
+| `FIELD_VAT_NUMBER` | `VAT number` | Label for the VAT / jurisdiction identifier field |
+| `FIELD_INCORPORATED` | `Registered` | Label for the incorporation date field |
+| `FIELD_LEGAL_FORM` | `Legal form` | Label for the company type field |
+| `FIELD_STATUS` | `Status` | Label for the current status field |
+
+---
+
+## Error Responses
+
+All errors follow the same shape:
+
+```json
+{ "error": "Human-readable message.", "details": "Optional stack or cause." }
+```
+
+| Status | Meaning |
+|---|---|
+| `400` | Missing or invalid request body field |
+| `404` | No company found for the given query |
+| `500` | Scraper error (network, selector change, timeout) |

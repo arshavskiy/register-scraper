@@ -1,5 +1,5 @@
-const { Router } = require("express");
-const { getCompanyByNameOrNumber, scrapeByUrl } = require("../scraper");
+import { Router } from "express";
+import { getCompanyByNameOrNumber, getAutocompleteSuggestions, scrapeByUrl } from "../scraper.js";
 
 const router = Router();
 
@@ -47,6 +47,40 @@ router.post("/getCompanyByNameOrNumber", async (req, res) => {
 });
 
 // ============================================================================
+// POST /getAutocompleteSuggestions
+// Body: { "jurisdiction_code": "ee", "company_name": "abc" }
+// ============================================================================
+router.post("/getAutocompleteSuggestions", async (req, res) => {
+  const { jurisdiction_code, company_name, company_number } = req.body;
+
+  const query = (company_name || company_number || "").trim();
+
+  if (!query) {
+    res.status(400).json({
+      error: 'At least one of "company_name" or "company_number" is required.',
+      example: { jurisdiction_code: "ee", company_name: "abc" },
+    });
+    return;
+  }
+
+  const jCode = (jurisdiction_code || "ee").toLowerCase();
+
+  try {
+    const suggestions = await getAutocompleteSuggestions(query);
+
+    if (suggestions.length === 0) {
+      res.status(404).json({ error: "No autocomplete suggestions found.", query });
+      return;
+    }
+
+    res.json({ jurisdiction_code: jCode, query, suggestions });
+  } catch (err) {
+    console.error("[getAutocompleteSuggestions] Error:", err);
+    res.status(500).json({ error: "Failed to get suggestions.", details: String(err) });
+  }
+});
+
+// ============================================================================
 // POST /getCompleteInfo
 // Body: { "jurisdiction_code": "ee", "url": "https://ariregister.rik.ee/..." }
 // ============================================================================
@@ -73,4 +107,4 @@ router.post("/getCompleteInfo", async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

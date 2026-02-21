@@ -1,7 +1,11 @@
-const { chromium } = require("playwright");
-const cheerio = require("cheerio");
-const fs = require("fs");
-const path = require("path");
+import { chromium } from "playwright";
+import * as cheerio from "cheerio";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // ============================================================================
 // CONFIG
@@ -40,6 +44,10 @@ function getConfig() {
       searchInput: process.env.SELECTOR_SEARCH_INPUT || "input#company_search",
       searchButton: process.env.SELECTOR_SEARCH_BUTTON || "button.btn-search",
       resultRow: process.env.SELECTOR_RESULT_ROW || "table tbody tr",
+      autocompleteDropdown:
+        process.env.SELECTOR_AUTOCOMPLETE_DROPDOWN || ".typeahead[role='listbox']",
+      autocompleteItem:
+        process.env.SELECTOR_AUTOCOMPLETE_ITEM || ".typeahead [role='option']",
     },
     userAgent:
       process.env.USER_AGENT ||
@@ -264,7 +272,20 @@ async function getCompanyByNameOrNumber(query) {
     }
 
     const html = await page.content();
-    return extractSearchResults(html, config.baseUrl);
+    const results = extractSearchResults(html, config.baseUrl);
+
+    if (results.length > 0) {
+      const folderPath = getOutputFolder();
+      const safeName = `search-${sanitizeFilename(query)}`;
+      await page.screenshot({
+        path: path.join(folderPath, `${safeName}.jpg`),
+        fullPage: true,
+      });
+      saveJsonFile(path.join(folderPath, `${safeName}.json`), results);
+      console.log(`[saved] ${folderPath}/${safeName}.{jpg,json}`);
+    }
+
+    return results;
   } finally {
     await browser.close();
   }
@@ -383,4 +404,57 @@ async function scrapeByUrl(url) {
   }
 }
 
-module.exports = { getCompanyByNameOrNumber, scrapeByUrl };
+/**
+ * Type a query into the search box and capture the autocomplete dropdown list
+ * that appears before the search is submitted. Saves screenshot + JSON to data/.
+ */
+async function getAutocompleteSuggestions(query) {
+  const { browser, page, config } = await launchPage();
+
+  try {
+    await page.goto(config.searchUrl, { waitUntil: "networkidle" });
+    await acceptCookiesIfPresent(page);
+    await page.waitForSelector(config.selectors.searchInput);
+
+    // Type character-by-character with a small delay to trigger autocomplete
+    await page.click(config.selectors.searchInput);
+    await page.type(config.selectors.searchInput, query, { delay: 80 });
+
+    // Wait for the dropdown to become visible
+    try {
+      await page.waitForSelector(config.selectors.autocompleteDropdown, {
+        state: "visible",
+        timeout: 4000,
+      });
+    } catch {
+      console.log("[autocomplete] No dropdown appeared for query:", query);
+      return [];
+    }
+
+    const suggestions = await page
+      .$$eval(config.selectors.autocompleteItem, (items) =>
+        items
+          .map((item) => {
+            const text = (item.textContent ?? "").trim().replace(/\s+/g, " ");
+            return text ? { text } : null;
+          })
+          .filter(Boolean),
+      )
+      .catch(() => []);
+
+    const folderPath = getOutputFolder();
+    const safeName = `autocomplete-${sanitizeFilename(query)}`;
+    await page.screenshot({
+      path: path.join(folderPath, `${safeName}.jpg`),
+      fullPage: false,
+    });
+    saveJsonFile(path.join(folderPath, `${safeName}.json`), suggestions);
+    console.log(`[saved] ${folderPath}/${safeName}.{jpg,json}`);
+
+    return suggestions;
+  } finally {
+    await browser.close();
+  }
+}
+
+export { getCompanyByNameOrNumber, getAutocompleteSuggestions, scrapeByUrl };
