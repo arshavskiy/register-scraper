@@ -274,6 +274,11 @@ All options are set via `.env`:
 | `SELECTOR_SEARCH_INPUT` | `input#company_search` | Search field selector |
 | `SELECTOR_SEARCH_BUTTON` | `button.btn-search` | Search submit button selector |
 | `WANTED_SECTIONS` | all 12 sections | Comma-separated list of sections to extract |
+| `FIELD_REGISTRY_CODE` | `Registry code` | Label for the company number field |
+| `FIELD_VAT_NUMBER` | `VAT number` | Label for the VAT / jurisdiction identifier field |
+| `FIELD_INCORPORATED` | `Registered` | Label for the incorporation date field |
+| `FIELD_LEGAL_FORM` | `Legal form` | Label for the company type field |
+| `FIELD_STATUS` | `Status` | Label for the current status field |
 
 ---
 

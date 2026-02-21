@@ -26,7 +26,10 @@ function getConfig() {
   const rawSections = process.env.WANTED_SECTIONS;
   const wantedSections =
     rawSections && rawSections.trim()
-      ? rawSections.split(",").map((s) => s.trim()).filter(Boolean)
+      ? rawSections
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
       : DEFAULT_SECTIONS;
 
   return {
@@ -42,6 +45,13 @@ function getConfig() {
       process.env.USER_AGENT ||
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     wantedSections,
+    fieldMap: {
+      registryCode: process.env.FIELD_REGISTRY_CODE || "Registry code",
+      vatNumber: process.env.FIELD_VAT_NUMBER || "VAT number",
+      incorporated: process.env.FIELD_INCORPORATED || "Registered",
+      legalForm: process.env.FIELD_LEGAL_FORM || "Legal form",
+      status: process.env.FIELD_STATUS || "Status",
+    },
   };
 }
 
@@ -60,7 +70,11 @@ function extractFields($, container) {
 
   container.find(".row").each((_, row) => {
     const $row = $(row);
-    let label = $row.find(".text-muted, .col-md-4, .col-4").first().text().trim();
+    let label = $row
+      .find(".text-muted, .col-md-4, .col-4")
+      .first()
+      .text()
+      .trim();
     let value = $row
       .find(".font-weight-bold, .col:not(.col-md-4):not(.text-muted)")
       .first()
@@ -105,7 +119,11 @@ function extractLinks($, container, baseUrl) {
 function extractContent($, container) {
   const clone = container.clone();
   clone.find("h2, script, style, img").remove();
-  return clone.text().replace(/\s+/g, " ").replace(/\u00A0/g, " ").trim();
+  return clone
+    .text()
+    .replace(/\s+/g, " ")
+    .replace(/\u00A0/g, " ")
+    .trim();
 }
 
 function extractAllSections(html, wantedSections, baseUrl) {
@@ -148,7 +166,11 @@ function extractSearchResults(html, baseUrl) {
     const cardBody = $(a).closest(".card-body");
     cardBody.find(".row").each((_, row) => {
       const label = $(row).find(".col-md-2").text().trim();
-      const value = $(row).find(".col.font-weight-bold").text().replace(/\s+/g, " ").trim();
+      const value = $(row)
+        .find(".col.font-weight-bold")
+        .text()
+        .replace(/\s+/g, " ")
+        .trim();
       if (label === "Registry code" && !registryCode) registryCode = value;
       if (label === "Status") status = value;
       if (label === "Address") address = value;
@@ -268,7 +290,11 @@ async function scrapeByUrl(url) {
     await page.waitForLoadState("networkidle");
 
     const html = await page.content();
-    const sections = extractAllSections(html, config.wantedSections, config.baseUrl);
+    const sections = extractAllSections(
+      html,
+      config.wantedSections,
+      config.baseUrl,
+    );
     const general = sections.find((s) => s.title === "General information");
     const vat = sections.find((s) => s.title === "VAT information");
 
@@ -327,14 +353,15 @@ async function scrapeByUrl(url) {
       )
       .catch(() => []);
 
+    const { fieldMap } = config;
     const result = {
       company_name: companyName,
-      company_number: general?.fields["Registry code"] ?? "",
-      jurisdiction_ident: vat?.fields["VAT number"] ?? "",
-      incorporation_date: general?.fields["Registered"] ?? "",
+      company_number: general?.fields[fieldMap.registryCode] ?? "",
+      jurisdiction_ident: vat?.fields[fieldMap.vatNumber] ?? "",
+      incorporation_date: general?.fields[fieldMap.incorporated] ?? "",
       dissolution_date: "",
-      company_type: general?.fields["Legal form"] ?? "",
-      current_status: general?.fields["Status"] ?? "",
+      company_type: general?.fields[fieldMap.legalForm] ?? "",
+      current_status: general?.fields[fieldMap.status] ?? "",
       more_info_available: sections.length > 0,
       ultimate_beneficial_owners,
       officers,
