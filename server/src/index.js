@@ -1,18 +1,15 @@
-import 'dotenv/config';
-import express from 'express';
-import companyRoutes from './routes/company';
+require("dotenv").config();
+const express = require("express");
+const companyRoutes = require("./routes/company");
 
 const app = express();
-const PORT = parseInt(process.env.PORT || '3000', 10);
+const PORT = parseInt(process.env.PORT || "3000", 10);
 
 app.use(express.json());
+app.use("/", companyRoutes);
 
-// Routes
-app.use('/', companyRoutes);
-
-// Health check
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
 app.listen(PORT, () => {

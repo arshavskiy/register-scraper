@@ -1,0 +1,19 @@
+{
+  "name": "register-scraper-server",
+  "version": "1.0.0",
+  "description": "API server for Estonian Business Register scraper",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "playwright": "^1.58.0"
+  }
+}

@@ -1,71 +1,7 @@
-import { chromium, Page } from "playwright";
-import * as cheerio from "cheerio";
-import fs from "fs";
-import path from "path";
-
-// ============================================================================
-// TYPES
-// ============================================================================
-
-export interface Link {
-  text: string;
-  href: string;
-}
-
-export interface Section {
-  title: string;
-  fields: Record<string, string>;
-  content: string;
-  links: Link[];
-}
-
-export interface CompanySearchResult {
-  name: string;
-  registryCode: string;
-  status: string;
-  address: string;
-  url: string;
-}
-
-export interface CompanyFullData {
-  name: string;
-  sections: Section[];
-}
-
-export interface Officer {
-  name: string;
-  position: string;
-  entityType: null;
-}
-
-export interface Shareholder {
-  name: string;
-  shares: string;
-  shareCount: null;
-  entityType: null;
-  type_of_control: string;
-}
-
-export interface UBO {
-  name: string;
-  position: null;
-  entityType: null;
-  type_of_control: string;
-}
-
-export interface CompanyDetailResponse {
-  company_name: string;
-  company_number: string;
-  jurisdiction_ident: string;
-  incorporation_date: string;
-  dissolution_date: string;
-  company_type: string;
-  current_status: string;
-  more_info_available: boolean;
-  ultimate_beneficial_owners: UBO[];
-  officers: Officer[];
-  shareholders: Shareholder[];
-}
+const { chromium } = require("playwright");
+const cheerio = require("cheerio");
+const fs = require("fs");
+const path = require("path");
 
 // ============================================================================
 // CONFIG
@@ -90,10 +26,7 @@ function getConfig() {
   const rawSections = process.env.WANTED_SECTIONS;
   const wantedSections =
     rawSections && rawSections.trim()
-      ? rawSections
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
+      ? rawSections.split(",").map((s) => s.trim()).filter(Boolean)
       : DEFAULT_SECTIONS;
 
   return {
@@ -102,8 +35,7 @@ function getConfig() {
     browserOptions: { headless: process.env.BROWSER_HEADLESS !== "false" },
     selectors: {
       searchInput: process.env.SELECTOR_SEARCH_INPUT || "input#company_search",
-      searchButton:
-        process.env.SELECTOR_SEARCH_BUTTON || "button.btn-search",
+      searchButton: process.env.SELECTOR_SEARCH_BUTTON || "button.btn-search",
       resultRow: process.env.SELECTOR_RESULT_ROW || "table tbody tr",
     },
     userAgent:
@@ -117,25 +49,18 @@ function getConfig() {
 // HTML EXTRACTION
 // ============================================================================
 
-function normalizeUrl(href: string, baseUrl: string): string | null {
+function normalizeUrl(href, baseUrl) {
   if (!href || href === "#") return null;
   if (href.startsWith("/")) return baseUrl + href;
   return href;
 }
 
-function extractFields(
-  $: cheerio.CheerioAPI,
-  container: ReturnType<ReturnType<typeof cheerio.load>>,
-): Record<string, string> {
-  const fields: Record<string, string> = {};
+function extractFields($, container) {
+  const fields = {};
 
-  container.find(".row").each((_: number, row: cheerio.Element) => {
+  container.find(".row").each((_, row) => {
     const $row = $(row);
-    let label = $row
-      .find(".text-muted, .col-md-4, .col-4")
-      .first()
-      .text()
-      .trim();
+    let label = $row.find(".text-muted, .col-md-4, .col-4").first().text().trim();
     let value = $row
       .find(".font-weight-bold, .col:not(.col-md-4):not(.text-muted)")
       .first()
@@ -150,7 +75,7 @@ function extractFields(
           label = firstDivText;
           value = directDivs
             .slice(1)
-            .map((_idx: number, div: cheerio.Element) => $(div).text().trim())
+            .map((_, div) => $(div).text().trim())
             .get()
             .join("\n");
         }
@@ -165,14 +90,10 @@ function extractFields(
   return fields;
 }
 
-function extractLinks(
-  $: cheerio.CheerioAPI,
-  container: ReturnType<ReturnType<typeof cheerio.load>>,
-  baseUrl: string,
-): Link[] {
-  const links: Link[] = [];
+function extractLinks($, container, baseUrl) {
+  const links = [];
 
-  container.find("a").each((_: number, a: cheerio.Element) => {
+  container.find("a").each((_, a) => {
     const text = $(a).text().trim();
     const href = normalizeUrl($(a).attr("href") || "", baseUrl);
     if (href) links.push({ text, href });
@@ -181,29 +102,18 @@ function extractLinks(
   return links;
 }
 
-function extractContent(
-  $: cheerio.CheerioAPI,
-  container: ReturnType<ReturnType<typeof cheerio.load>>,
-): string {
+function extractContent($, container) {
   const clone = container.clone();
   clone.find("h2, script, style, img").remove();
-  return clone
-    .text()
-    .replace(/\s+/g, " ")
-    .replace(/\u00A0/g, " ")
-    .trim();
+  return clone.text().replace(/\s+/g, " ").replace(/\u00A0/g, " ").trim();
 }
 
-function extractAllSections(
-  html: string,
-  wantedSections: string[],
-  baseUrl: string,
-): Section[] {
+function extractAllSections(html, wantedSections, baseUrl) {
   const $ = cheerio.load(html);
   const wantedLowercase = wantedSections.map((s) => s.toLowerCase().trim());
-  const sections: Section[] = [];
+  const sections = [];
 
-  $(".h2").each((_: number, h2El: cheerio.Element) => {
+  $(".h2").each((_, h2El) => {
     const title = $(h2El).text().trim();
     if (!title || !wantedLowercase.includes(title.toLowerCase())) return;
 
@@ -212,47 +122,31 @@ function extractAllSections(
 
     sections.push({
       title,
-      fields: extractFields(
-        $,
-        container as ReturnType<ReturnType<typeof cheerio.load>>,
-      ),
-      content: extractContent(
-        $,
-        container as ReturnType<ReturnType<typeof cheerio.load>>,
-      ),
-      links: extractLinks(
-        $,
-        container as ReturnType<ReturnType<typeof cheerio.load>>,
-        baseUrl,
-      ),
+      fields: extractFields($, container),
+      content: extractContent($, container),
+      links: extractLinks($, container, baseUrl),
     });
   });
 
   return sections;
 }
 
-function extractSearchResults(
-  html: string,
-  baseUrl: string,
-): CompanySearchResult[] {
+function extractSearchResults(html, baseUrl) {
   const $ = cheerio.load(html);
-  const results: CompanySearchResult[] = [];
+  const results = [];
 
-  // Results are rendered as cards; each company has an a.h2.text-primary link
-  $("a.h2.text-primary").each((_: number, a: cheerio.Element) => {
+  $("a.h2.text-primary").each((_, a) => {
     const name = $(a).text().trim();
     const href = $(a).attr("href") || "";
     const url = normalizeUrl(href, baseUrl) || "";
 
-    // Registry code is embedded in the URL: /company/XXXXXXXX/
     const codeMatch = href.match(/\/company\/(\d+)\//);
     let registryCode = codeMatch ? codeMatch[1] : "";
     let status = "";
     let address = "";
 
-    // Pull label/value pairs from the containing card-body .row elements
     const cardBody = $(a).closest(".card-body");
-    cardBody.find(".row").each((_: number, row: cheerio.Element) => {
+    cardBody.find(".row").each((_, row) => {
       const label = $(row).find(".col-md-2").text().trim();
       const value = $(row).find(".col.font-weight-bold").text().replace(/\s+/g, " ").trim();
       if (label === "Registry code" && !registryCode) registryCode = value;
@@ -270,11 +164,11 @@ function extractSearchResults(
 // FILE SYSTEM UTILITIES
 // ============================================================================
 
-function getTodayDate(): string {
+function getTodayDate() {
   return new Date().toISOString().split("T")[0];
 }
 
-function getOutputFolder(): string {
+function getOutputFolder() {
   const dataFolder = process.env.DATA_FOLDER || "./data";
   const folderPath = path.join(dataFolder, getTodayDate());
   if (!fs.existsSync(folderPath)) {
@@ -283,11 +177,11 @@ function getOutputFolder(): string {
   return folderPath;
 }
 
-function sanitizeFilename(name: string): string {
+function sanitizeFilename(name) {
   return name.replace(/[/\\?%*:|"<>]/g, "-");
 }
 
-function saveJsonFile(filePath: string, data: unknown): void {
+function saveJsonFile(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
 }
 
@@ -302,7 +196,7 @@ async function launchPage() {
   return { browser, page, config };
 }
 
-async function acceptCookiesIfPresent(page: Page) {
+async function acceptCookiesIfPresent(page) {
   try {
     const btn = page.locator("button#accept-cookies").first();
     if (await btn.isVisible({ timeout: 2000 })) {
@@ -315,11 +209,7 @@ async function acceptCookiesIfPresent(page: Page) {
   }
 }
 
-async function runSearch(
-  page: Page,
-  config: ReturnType<typeof getConfig>,
-  query: string,
-) {
+async function runSearch(page, config, query) {
   await page.goto(config.searchUrl, { waitUntil: "networkidle" });
   await acceptCookiesIfPresent(page);
   await page.waitForSelector(config.selectors.searchInput);
@@ -334,11 +224,9 @@ async function runSearch(
 
 /**
  * Search by company name or registry number.
- * Returns a list of matching results from the search results table.
+ * Returns a list of matching results from the search results page.
  */
-export async function getCompanyByNameOrNumber(
-  query: string,
-): Promise<CompanySearchResult[]> {
+async function getCompanyByNameOrNumber(query) {
   const { browser, page, config } = await launchPage();
 
   try {
@@ -350,7 +238,6 @@ export async function getCompanyByNameOrNumber(
         timeout: 5000,
       });
     } catch {
-      // No results found
       return [];
     }
 
@@ -365,25 +252,23 @@ export async function getCompanyByNameOrNumber(
  * Navigate directly to a company detail URL and return the structured response.
  * Takes a screenshot and saves JSON to ./data/YYYY-MM-DD/.
  */
-export async function scrapeByUrl(url: string): Promise<CompanyDetailResponse> {
+async function scrapeByUrl(url) {
   const { browser, page, config } = await launchPage();
 
   try {
     await page.goto(url, { waitUntil: "networkidle" });
     await acceptCookiesIfPresent(page);
 
-    // Company name from page title: "Bolt Operations OÜ | e-Äriregister"
     const pageTitle = await page.title();
     const companyName = pageTitle.split("|")[0].trim();
 
-    // General info via Cheerio
     const html = await page.content();
     const sections = extractAllSections(html, config.wantedSections, config.baseUrl);
     const general = sections.find((s) => s.title === "General information");
     const vat = sections.find((s) => s.title === "VAT information");
 
     // Officers — #representativesTable
-    const officers: Officer[] = await page
+    const officers = await page
       .$$eval("#representativesTable tbody tr", (rows) =>
         rows.map((row) => {
           const cells = [...row.querySelectorAll("td")].map(
@@ -395,7 +280,7 @@ export async function scrapeByUrl(url: string): Promise<CompanyDetailResponse> {
       .catch(() => []);
 
     // Shareholders — table whose first header is "Participation"
-    const shareholders: Shareholder[] = await page
+    const shareholders = await page
       .$$eval("table", (tables) => {
         for (const table of tables) {
           const headers = [
@@ -406,7 +291,6 @@ export async function scrapeByUrl(url: string): Promise<CompanyDetailResponse> {
             const cells = [...row.querySelectorAll("td")].map(
               (td) => td.textContent?.trim().replace(/\s+/g, " ") ?? "",
             );
-            // Contribution cell: "2701.00 EUR Sole ownership"
             const contribMatch = cells[1]?.match(/^[\d.,]+\s+EUR\s+(.*)/);
             return {
               name: cells[2] ?? "",
@@ -422,7 +306,7 @@ export async function scrapeByUrl(url: string): Promise<CompanyDetailResponse> {
       .catch(() => []);
 
     // Beneficial owners — #beneficiaries-table
-    const ultimate_beneficial_owners: UBO[] = await page
+    const ultimate_beneficial_owners = await page
       .$$eval("#beneficiaries-table tbody tr", (rows) =>
         rows.map((row) => {
           const cells = [...row.querySelectorAll("td")].map(
@@ -438,7 +322,7 @@ export async function scrapeByUrl(url: string): Promise<CompanyDetailResponse> {
       )
       .catch(() => []);
 
-    const result: CompanyDetailResponse = {
+    const result = {
       company_name: companyName,
       company_number: general?.fields["Registry code"] ?? "",
       jurisdiction_ident: vat?.fields["VAT number"] ?? "",
@@ -452,7 +336,6 @@ export async function scrapeByUrl(url: string): Promise<CompanyDetailResponse> {
       shareholders,
     };
 
-    // Persist screenshot + JSON
     const folderPath = getOutputFolder();
     const safeName = sanitizeFilename(companyName || "company");
     await page.screenshot({
@@ -467,3 +350,5 @@ export async function scrapeByUrl(url: string): Promise<CompanyDetailResponse> {
     await browser.close();
   }
 }
+
+module.exports = { getCompanyByNameOrNumber, scrapeByUrl };

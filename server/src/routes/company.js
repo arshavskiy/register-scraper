@@ -1,24 +1,14 @@
-import { Router, Request, Response } from "express";
-import { getCompanyByNameOrNumber, scrapeByUrl } from "../scraper";
+const { Router } = require("express");
+const { getCompanyByNameOrNumber, scrapeByUrl } = require("../scraper");
 
 const router = Router();
 
 // ============================================================================
 // POST /getCompanyByNameOrNumber
 // Body: { "jurisdiction_code": "ee", "company_name": "...", "company_number": "..." }
-// At least one of company_name or company_number is required.
-// Returns: array of matching companies from the search results page.
 // ============================================================================
-router.post("/getCompanyByNameOrNumber", async (req: Request, res: Response) => {
-  const {
-    jurisdiction_code,
-    company_name,
-    company_number,
-  } = req.body as {
-    jurisdiction_code?: string;
-    company_name?: string;
-    company_number?: string;
-  };
+router.post("/getCompanyByNameOrNumber", async (req, res) => {
+  const { jurisdiction_code, company_name, company_number } = req.body;
 
   const query = (company_name || company_number || "").trim();
 
@@ -59,14 +49,9 @@ router.post("/getCompanyByNameOrNumber", async (req: Request, res: Response) => 
 // ============================================================================
 // POST /getCompleteInfo
 // Body: { "jurisdiction_code": "ee", "url": "https://ariregister.rik.ee/..." }
-// Navigates directly to the company URL, extracts structured data,
-// saves screenshot + JSON to ./data/YYYY-MM-DD/.
 // ============================================================================
-router.post("/getCompleteInfo", async (req: Request, res: Response) => {
-  const { jurisdiction_code, url } = req.body as {
-    jurisdiction_code?: string;
-    url?: string;
-  };
+router.post("/getCompleteInfo", async (req, res) => {
+  const { url } = req.body;
 
   if (!url || typeof url !== "string" || !url.trim()) {
     res.status(400).json({
@@ -88,4 +73,4 @@ router.post("/getCompleteInfo", async (req: Request, res: Response) => {
   }
 });
 
-export default router;
+module.exports = router;
