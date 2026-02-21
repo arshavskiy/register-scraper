@@ -1,5 +1,5 @@
-const { Router } = require("express");
-const { getCompanyByNameOrNumber, scrapeByUrl } = require("../scraper");
+import { Router } from "express";
+import { getCompanyByNameOrNumber, scrapeByUrl } from "../scraper.js";
 
 const router = Router();
 
@@ -73,4 +73,4 @@ router.post("/getCompleteInfo", async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

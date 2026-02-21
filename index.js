@@ -1,6 +1,6 @@
-require("dotenv").config();
-const express = require("express");
-const companyRoutes = require("./routes/company");
+import "dotenv/config";
+import express from "express";
+import companyRoutes from "./routes/company.js";
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3000", 10);
