@@ -1,0 +1,38 @@
+# ============================================================
+# Caddyfile — reverse proxy for register-scraper API server
+# ============================================================
+#
+# Option A: HTTP only (local / behind another TLS terminator)
+# Replace :80 with your actual domain for automatic HTTPS.
+#
+# Option B: Automatic HTTPS — just replace ":80" with your
+# domain, e.g.  api.example.com { ... }
+# Caddy will obtain and renew a Let's Encrypt cert automatically.
+# ============================================================
+
+:80 {
+    # Forward all requests to the Node.js server
+    reverse_proxy localhost:3000
+
+    # Optional: enable access logs
+    # log {
+    #     output file /var/log/caddy/access.log
+    #     format json
+    # }
+
+    # Optional: CORS headers (uncomment if needed)
+    # header {
+    #     Access-Control-Allow-Origin *
+    #     Access-Control-Allow-Methods "GET, POST, OPTIONS"
+    #     Access-Control-Allow-Headers "Content-Type"
+    # }
+
+    # Optional: rate limiting (requires caddy-ratelimit plugin)
+    # rate_limit {
+    #     zone api_zone {
+    #         key {remote_host}
+    #         events 100
+    #         window 1m
+    #     }
+    # }
+}

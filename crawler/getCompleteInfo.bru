@@ -1,0 +1,22 @@
+meta {
+  name: getCompleteInfo
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://localhost:3000/getCompanyByNameOrNumber
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+      "query": "Estonia LTD"
+    }
+}
+
+settings {
+  encodeUrl: false
+  timeout: 0
+}
