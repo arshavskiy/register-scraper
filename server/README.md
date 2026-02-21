@@ -1,6 +1,6 @@
 # Estonian Business Register — API Server
 
-A Node.js + TypeScript REST API that wraps the Estonian Business Register scraper and exposes it over HTTP. Designed to run behind a **Caddy** reverse proxy.
+A Node.js REST API that wraps the Estonian Business Register scraper and exposes it over HTTP. Designed to run behind a **Caddy** reverse proxy.
 
 ---
 
@@ -9,7 +9,7 @@ A Node.js + TypeScript REST API that wraps the Estonian Business Register scrape
 | Layer | Technology |
 |---|---|
 | Runtime | Node.js |
-| Language | TypeScript |
+| Language | JavaScript (CommonJS) |
 | HTTP server | Express |
 | Browser automation | Playwright (Chromium) |
 | HTML parsing | Cheerio |
@@ -22,18 +22,19 @@ A Node.js + TypeScript REST API that wraps the Estonian Business Register scrape
 ```
 server/
 ├── src/
-│   ├── index.ts          # Express app entry point
-│   ├── scraper.ts        # Playwright + Cheerio scraping logic
+│   ├── index.js          # Express app entry point
+│   ├── scraper.js        # Playwright + Cheerio scraping logic
 │   └── routes/
-│       └── company.ts    # POST /getCompanyByNameOrNumber, POST /getCompleteInfo
-├── data/                 # Output folder (auto-created, gitignored)
-│   └── YYYY-MM-DD/
-│       ├── CompanyName.jpg
-│       └── CompanyName.json
+│       └── company.js    # POST /getCompanyByNameOrNumber, POST /getCompleteInfo
 ├── package.json
-├── tsconfig.json
 ├── Caddyfile
 └── .env.example
+
+# Output is written to the shared project data folder:
+../data/
+└── YYYY-MM-DD/
+    ├── CompanyName.jpg   ← full-page screenshot
+    └── CompanyName.json  ← structured JSON result
 ```
 
 ---
@@ -65,7 +66,7 @@ Edit `.env` as needed — defaults work out of the box.
 
 ## Running
 
-### Development (hot reload)
+### Development (auto-restart on file change)
 
 ```bash
 npm run dev
@@ -74,7 +75,6 @@ npm run dev
 ### Production
 
 ```bash
-npm run build
 npm start
 ```
 
@@ -114,7 +114,7 @@ GET /health
 
 ### POST /getCompanyByNameOrNumber
 
-Search the Estonian Business Register by company name or registry code. Returns a list of matching results.
+Search the Estonian Business Register by company name or registry code. Returns a list of matching companies.
 
 **Request**
 
@@ -123,43 +123,45 @@ POST /getCompanyByNameOrNumber
 Content-Type: application/json
 
 {
-  "query": "BOLT OPERATIONS OÜ"
+  "jurisdiction_code": "ee",
+  "company_name": "BOLT OPERATIONS OÜ"
 }
 ```
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `query` | string | Yes | Company name or registry code |
+| `jurisdiction_code` | string | No | ISO 3166-1 alpha-2 country code (default: `"ee"`) |
+| `company_name` | string | One of these | Company name to search |
+| `company_number` | string | One of these | Registry code to search |
+
+At least one of `company_name` or `company_number` must be provided. If both are given, `company_name` takes precedence.
 
 **Response — 200 OK**
 
 ```json
-{
-  "query": "BOLT OPERATIONS OÜ",
-  "total": 1,
-  "results": [
-    {
-      "name": "Bolt Operations OÜ",
-      "registryCode": "14532901",
-      "status": "Entered into the register (25.07.2018)",
-      "address": "Harju maakond, Tallinn, Kesklinna linnaosa, Vana-Lõuna tn 15, 10134",
-      "url": "https://ariregister.rik.ee/eng/company/14532901/..."
-    }
-  ]
-}
+[
+  {
+    "jurisdiction_code": "ee",
+    "company_name": "Bolt Operations OÜ",
+    "company_number": "14532901",
+    "address": "Harju maakond, Tallinn, Kesklinna linnaosa, Vana-Lõuna tn 15, 10134",
+    "status": "Entered into the register (25.07.2018)",
+    "url": "https://ariregister.rik.ee/eng/company/14532901/..."
+  }
+]
 ```
 
 **Response — 404 Not Found**
 
 ```json
-{ "error": "No companies found for the given query.", "query": "..." }
+{ "error": "No companies found.", "query": "..." }
 ```
 
 ---
 
 ### POST /getCompleteInfo
 
-Scrape the full detail page of a company. Extracts all available sections, saves a full-page screenshot and a JSON file to `./data/YYYY-MM-DD/`.
+Navigate directly to a company detail page by URL. Extracts structured data, saves a full-page screenshot and a JSON file to `../data/YYYY-MM-DD/`.
 
 **Request**
 
@@ -168,65 +170,92 @@ POST /getCompleteInfo
 Content-Type: application/json
 
 {
-  "company": "BOLT OPERATIONS OÜ"
+  "jurisdiction_code": "ee",
+  "url": "https://ariregister.rik.ee/eng/company/14532901/Bolt-Operations-O%C3%9C"
 }
 ```
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `company` | string | Yes | Exact company name as listed in the register |
+| `jurisdiction_code` | string | No | ISO 3166-1 alpha-2 country code (default: `"ee"`) |
+| `url` | string | Yes | Full URL of the company detail page |
+
+> Tip: get the URL from `POST /getCompanyByNameOrNumber` → `results[n].url`
 
 **Response — 200 OK**
 
 ```json
 {
-  "name": "BOLT OPERATIONS OÜ",
-  "sections": [
+  "company_name": "Bolt Operations OÜ",
+  "company_number": "14532901",
+  "jurisdiction_ident": "EE102090374",
+  "incorporation_date": "25.07.2018",
+  "dissolution_date": "",
+  "company_type": "Private limited company",
+  "current_status": "Entered into the register",
+  "more_info_available": true,
+  "ultimate_beneficial_owners": [
     {
-      "title": "General information",
-      "fields": {
-        "Registry code": "14532901",
-        "Legal form": "Private limited company",
-        "Status": "Entered into the register",
-        "Capital": "Capital is 2 701 €",
-        "Registered": "25.07.2018"
-      },
-      "content": "Full plain-text content of the section...",
-      "links": [
-        { "text": "PDF", "href": "https://ariregister.rik.ee/eng/company/14532901/file/..." }
-      ]
+      "name": "Markus Villig",
+      "position": null,
+      "entityType": null,
+      "type_of_control": "Control or influence through other means (contractual, family relations etc)"
+    }
+  ],
+  "officers": [
+    {
+      "name": "Ahto Kink",
+      "position": "Management board member",
+      "entityType": null
+    },
+    {
+      "name": "Vincent Roland Pickering",
+      "position": "Management board member",
+      "entityType": null
+    }
+  ],
+  "shareholders": [
+    {
+      "name": "Omanikukonto: Bolt Holdings OÜ",
+      "shares": "100.00%",
+      "shareCount": null,
+      "entityType": null,
+      "type_of_control": "Sole ownership"
     }
   ]
 }
 ```
 
-**Sections extracted** (up to 12):
-
-| # | Section |
-|---|---|
-| 1 | General information |
-| 2 | VAT information |
-| 3 | Right of representation |
-| 4 | Contacts |
-| 5 | Shareholders |
-| 6 | Tax information |
-| 7 | Activity licenses and notices of economic activities |
-| 8 | Annual reports |
-| 9 | Areas of activity |
-| 10 | Articles of association |
-| 11 | Beneficial owners |
-| 12 | Data protection officer |
-
 **Saved files**
 
-Every successful call writes two files:
+Every successful call writes two files to the shared project data folder:
 
 ```
-data/
+../data/
 └── 2026-02-21/
-    ├── BOLT OPERATIONS OÜ.jpg    ← full-page screenshot
-    └── BOLT OPERATIONS OÜ.json  ← structured JSON data
+    ├── Bolt Operations OÜ.jpg    ← full-page screenshot
+    └── Bolt Operations OÜ.json  ← structured JSON result
 ```
+
+---
+
+## Typical two-step workflow
+
+```bash
+# Step 1 — find the company and get its URL
+printf '{"jurisdiction_code":"ee","company_name":"BOLT OPERATIONS O\xc3\x9c"}' > search.json
+curl -X POST http://localhost:3000/getCompanyByNameOrNumber \
+     -H "Content-Type: application/json; charset=utf-8" \
+     -d @search.json
+
+# Step 2 — fetch full details using the URL from step 1
+printf '{"jurisdiction_code":"ee","url":"https://ariregister.rik.ee/eng/company/14532901/Bolt-Operations-O%%C3%%9C"}' > detail.json
+curl -X POST http://localhost:3000/getCompleteInfo \
+     -H "Content-Type: application/json; charset=utf-8" \
+     -d @detail.json
+```
+
+> On Windows (Git Bash), write the payload to a file using `printf` to preserve UTF-8 encoding, then pass the file with `-d @file`.
 
 ---
 
@@ -239,30 +268,12 @@ All options are set via `.env`:
 | `PORT` | `3000` | HTTP port the server listens on |
 | `BASE_URL` | `https://ariregister.rik.ee` | Registry base URL |
 | `SEARCH_URL` | `https://ariregister.rik.ee/eng` | Search page URL |
-| `DATA_FOLDER` | `./data` | Output folder for screenshots and JSON |
+| `DATA_FOLDER` | `../data` | Output folder for screenshots and JSON |
 | `BROWSER_HEADLESS` | `true` | Set to `false` to watch the browser |
 | `USER_AGENT` | Chrome 131 UA string | Browser user agent |
 | `SELECTOR_SEARCH_INPUT` | `input#company_search` | Search field selector |
 | `SELECTOR_SEARCH_BUTTON` | `button.btn-search` | Search submit button selector |
 | `WANTED_SECTIONS` | all 12 sections | Comma-separated list of sections to extract |
-
----
-
-## Testing with curl
-
-On Windows, write the payload to a file to preserve UTF-8 encoding:
-
-```bash
-printf '{"query": "BOLT OPERATIONS O\xc3\x9c"}' > q1.json
-curl -X POST http://localhost:3000/getCompanyByNameOrNumber \
-     -H "Content-Type: application/json; charset=utf-8" \
-     -d @q1.json
-
-printf '{"company": "BOLT OPERATIONS O\xc3\x9c"}' > q2.json
-curl -X POST http://localhost:3000/getCompleteInfo \
-     -H "Content-Type: application/json; charset=utf-8" \
-     -d @q2.json
-```
 
 ---
 
