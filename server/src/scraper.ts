@@ -32,6 +32,41 @@ export interface CompanyFullData {
   sections: Section[];
 }
 
+export interface Officer {
+  name: string;
+  position: string;
+  entityType: null;
+}
+
+export interface Shareholder {
+  name: string;
+  shares: string;
+  shareCount: null;
+  entityType: null;
+  type_of_control: string;
+}
+
+export interface UBO {
+  name: string;
+  position: null;
+  entityType: null;
+  type_of_control: string;
+}
+
+export interface CompanyDetailResponse {
+  company_name: string;
+  company_number: string;
+  jurisdiction_ident: string;
+  incorporation_date: string;
+  dissolution_date: string;
+  company_type: string;
+  current_status: string;
+  more_info_available: boolean;
+  ultimate_beneficial_owners: UBO[];
+  officers: Officer[];
+  shareholders: Shareholder[];
+}
+
 // ============================================================================
 // CONFIG
 // ============================================================================
@@ -327,34 +362,99 @@ export async function getCompanyByNameOrNumber(
 }
 
 /**
- * Get the complete structured data for a company (all 12 sections).
- * Searches by name, clicks into the first matching result, and extracts all sections.
+ * Navigate directly to a company detail URL and return the structured response.
+ * Takes a screenshot and saves JSON to ./data/YYYY-MM-DD/.
  */
-export async function getCompleteInfo(
-  companyName: string,
-): Promise<CompanyFullData> {
+export async function scrapeByUrl(url: string): Promise<CompanyDetailResponse> {
   const { browser, page, config } = await launchPage();
 
   try {
-    await runSearch(page, config, companyName);
+    await page.goto(url, { waitUntil: "networkidle" });
+    await acceptCookiesIfPresent(page);
 
-    // Click the first company result link
-    await page.waitForSelector("a.h2.text-primary", { timeout: 5000 });
-    await page.click("a.h2.text-primary");
-    await page.waitForLoadState("networkidle");
+    // Company name from page title: "Bolt Operations OÜ | e-Äriregister"
+    const pageTitle = await page.title();
+    const companyName = pageTitle.split("|")[0].trim();
 
+    // General info via Cheerio
     const html = await page.content();
-    const sections = extractAllSections(
-      html,
-      config.wantedSections,
-      config.baseUrl,
-    );
+    const sections = extractAllSections(html, config.wantedSections, config.baseUrl);
+    const general = sections.find((s) => s.title === "General information");
+    const vat = sections.find((s) => s.title === "VAT information");
 
-    const result: CompanyFullData = { name: companyName, sections };
+    // Officers — #representativesTable
+    const officers: Officer[] = await page
+      .$$eval("#representativesTable tbody tr", (rows) =>
+        rows.map((row) => {
+          const cells = [...row.querySelectorAll("td")].map(
+            (td) => td.textContent?.trim() ?? "",
+          );
+          return { name: cells[0], position: cells[2], entityType: null };
+        }),
+      )
+      .catch(() => []);
+
+    // Shareholders — table whose first header is "Participation"
+    const shareholders: Shareholder[] = await page
+      .$$eval("table", (tables) => {
+        for (const table of tables) {
+          const headers = [
+            ...(table.querySelector("thead")?.querySelectorAll("th") ?? []),
+          ].map((th) => th.textContent?.trim());
+          if (headers[0] !== "Participation") continue;
+          return [...table.querySelectorAll("tbody tr")].map((row) => {
+            const cells = [...row.querySelectorAll("td")].map(
+              (td) => td.textContent?.trim().replace(/\s+/g, " ") ?? "",
+            );
+            // Contribution cell: "2701.00 EUR Sole ownership"
+            const contribMatch = cells[1]?.match(/^[\d.,]+\s+EUR\s+(.*)/);
+            return {
+              name: cells[2] ?? "",
+              shares: cells[0] ?? "",
+              shareCount: null,
+              entityType: null,
+              type_of_control: contribMatch?.[1]?.trim() ?? cells[1] ?? "",
+            };
+          });
+        }
+        return [];
+      })
+      .catch(() => []);
+
+    // Beneficial owners — #beneficiaries-table
+    const ultimate_beneficial_owners: UBO[] = await page
+      .$$eval("#beneficiaries-table tbody tr", (rows) =>
+        rows.map((row) => {
+          const cells = [...row.querySelectorAll("td")].map(
+            (td) => td.textContent?.trim().replace(/\s+/g, " ") ?? "",
+          );
+          return {
+            name: cells[0],
+            position: null,
+            entityType: null,
+            type_of_control: cells[2],
+          };
+        }),
+      )
+      .catch(() => []);
+
+    const result: CompanyDetailResponse = {
+      company_name: companyName,
+      company_number: general?.fields["Registry code"] ?? "",
+      jurisdiction_ident: vat?.fields["VAT number"] ?? "",
+      incorporation_date: general?.fields["Registered"] ?? "",
+      dissolution_date: "",
+      company_type: general?.fields["Legal form"] ?? "",
+      current_status: general?.fields["Status"] ?? "",
+      more_info_available: sections.length > 0,
+      ultimate_beneficial_owners,
+      officers,
+      shareholders,
+    };
 
     // Persist screenshot + JSON
     const folderPath = getOutputFolder();
-    const safeName = sanitizeFilename(companyName);
+    const safeName = sanitizeFilename(companyName || "company");
     await page.screenshot({
       path: path.join(folderPath, `${safeName}.jpg`),
       fullPage: true,

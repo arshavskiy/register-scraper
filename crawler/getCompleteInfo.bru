@@ -5,15 +5,16 @@ meta {
 }
 
 post {
-  url: http://localhost:3000/getCompanyByNameOrNumber
+  url: http://localhost:3000/getCompleteInfo
   body: json
   auth: inherit
 }
 
 body:json {
   {
-      "query": "Estonia LTD"
-    }
+    "jurisdiction_code": "ee",
+    "url": "https://ariregister.rik.ee/eng/company/14354865/1911-Estonian-Shooting-O%C3%9C?search_id=eed398f&pos=2"
+  }
 }
 
 settings {
