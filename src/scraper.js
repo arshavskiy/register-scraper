@@ -3,9 +3,11 @@ import * as cheerio from "cheerio";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import JURISDICTION_ENDPOINTS from "./config/jurisdictions.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const DEFAULT_JURISDICTION = "ee";
 
 // ============================================================================
 // CONFIG
@@ -26,7 +28,24 @@ const DEFAULT_SECTIONS = [
   "Data protection officer",
 ];
 
-function getConfig() {
+function resolveJurisdictionEndpoints(code) {
+  const normalized = (code || DEFAULT_JURISDICTION).toLowerCase();
+  const fallback = JURISDICTION_ENDPOINTS.ee;
+
+  switch (normalized) {
+    case "lv":
+      return JURISDICTION_ENDPOINTS.lv ?? fallback;
+    case "lt":
+      return JURISDICTION_ENDPOINTS.lt ?? fallback;
+    case "fi":
+      return JURISDICTION_ENDPOINTS.fi ?? fallback;
+    case "ee":
+    default:
+      return fallback;
+  }
+}
+
+function getConfig(jurisdictionCode = DEFAULT_JURISDICTION) {
   const rawSections = process.env.WANTED_SECTIONS;
   const wantedSections =
     rawSections && rawSections.trim()
@@ -36,16 +55,22 @@ function getConfig() {
           .filter(Boolean)
       : DEFAULT_SECTIONS;
 
+  const endpoints = resolveJurisdictionEndpoints(jurisdictionCode);
+  const baseUrl = process.env.BASE_URL || endpoints.baseUrl;
+  const searchUrl = process.env.SEARCH_URL || endpoints.searchUrl;
+
   return {
-    baseUrl: process.env.BASE_URL || "https://ariregister.rik.ee",
-    searchUrl: process.env.SEARCH_URL || "https://ariregister.rik.ee/eng",
+    baseUrl,
+    searchUrl,
+    selectedJurisdiction: jurisdictionCode,
     browserOptions: { headless: process.env.BROWSER_HEADLESS !== "false" },
     selectors: {
       searchInput: process.env.SELECTOR_SEARCH_INPUT || "input#company_search",
       searchButton: process.env.SELECTOR_SEARCH_BUTTON || "button.btn-search",
       resultRow: process.env.SELECTOR_RESULT_ROW || "table tbody tr",
       autocompleteDropdown:
-        process.env.SELECTOR_AUTOCOMPLETE_DROPDOWN || ".typeahead[role='listbox']",
+        process.env.SELECTOR_AUTOCOMPLETE_DROPDOWN ||
+        ".typeahead[role='listbox']",
       autocompleteItem:
         process.env.SELECTOR_AUTOCOMPLETE_ITEM || ".typeahead [role='option']",
     },
@@ -198,9 +223,11 @@ function getTodayDate() {
   return new Date().toISOString().split("T")[0];
 }
 
-function getOutputFolder() {
+function getOutputFolder(jurisdictionCode = DEFAULT_JURISDICTION) {
   const dataFolder = process.env.DATA_FOLDER || "../data";
-  const folderPath = path.join(dataFolder, getTodayDate());
+  const dateFolder = getTodayDate();
+  const jCode = (jurisdictionCode || DEFAULT_JURISDICTION).toLowerCase();
+  const folderPath = path.join(dataFolder, dateFolder, jCode);
   if (!fs.existsSync(folderPath)) {
     fs.mkdirSync(folderPath, { recursive: true });
   }
@@ -219,10 +246,18 @@ function saveJsonFile(filePath, data) {
 // BROWSER HELPERS
 // ============================================================================
 
-async function launchPage() {
-  const config = getConfig();
+async function launchPage(jurisdictionCode = DEFAULT_JURISDICTION) {
+  const config = getConfig(jurisdictionCode);
+  console.log(
+    "[launchPage] Launching browser",
+    "jurisdiction",
+    jurisdictionCode,
+    "searchUrl",
+    config.searchUrl,
+  );
   const browser = await chromium.launch(config.browserOptions);
   const page = await browser.newPage({ userAgent: config.userAgent });
+  console.log("[launchPage] Browser and page launched successfully");
   return { browser, page, config };
 }
 
@@ -240,12 +275,23 @@ async function acceptCookiesIfPresent(page) {
 }
 
 async function runSearch(page, config, query) {
+  console.log("[runSearch] Navigating to search URL:", config.searchUrl);
   await page.goto(config.searchUrl, { waitUntil: "networkidle" });
   await acceptCookiesIfPresent(page);
+  console.log(
+    "[runSearch] Waiting for search input selector:",
+    config.selectors.searchInput,
+  );
   await page.waitForSelector(config.selectors.searchInput);
+  console.log("[runSearch] Filling search query:", query);
   await page.fill(config.selectors.searchInput, query);
+  console.log(
+    "[runSearch] Clicking search button:",
+    config.selectors.searchButton,
+  );
   await page.click(config.selectors.searchButton);
   await page.waitForTimeout(1500);
+  console.log("[runSearch] Search completed");
 }
 
 // ============================================================================
@@ -256,38 +302,85 @@ async function runSearch(page, config, query) {
  * Search by company name or registry number.
  * Returns a list of matching results from the search results page.
  */
-async function getCompanyByNameOrNumber(query) {
-  const { browser, page, config } = await launchPage();
+async function getCompanyByNameOrNumber(
+  query,
+  jurisdictionCode = DEFAULT_JURISDICTION,
+) {
+  const normalizedJurisdiction = (
+    jurisdictionCode || DEFAULT_JURISDICTION
+  ).toLowerCase();
+  console.log(
+    "[getCompanyByNameOrNumber] Starting search for:",
+    query,
+    "jurisdiction",
+    normalizedJurisdiction,
+  );
+  const { browser, page, config } = await launchPage(normalizedJurisdiction);
 
   try {
     await runSearch(page, config, query);
+    console.log(
+      "[getCompanyByNameOrNumber] Search executed, waiting for results...",
+      normalizedJurisdiction,
+    );
 
     try {
       await page.waitForSelector("a.h2.text-primary", {
         state: "attached",
         timeout: 5000,
       });
+      console.log("[getCompanyByNameOrNumber] Results found on page");
     } catch {
+      console.log(
+        "[getCompanyByNameOrNumber] No results found (timeout waiting for results)",
+        normalizedJurisdiction,
+      );
       return [];
     }
 
     const html = await page.content();
     const results = extractSearchResults(html, config.baseUrl);
+    console.log(
+      "[getCompanyByNameOrNumber] Extracted",
+      results.length,
+      "results",
+      normalizedJurisdiction,
+    );
 
     if (results.length > 0) {
-      const folderPath = getOutputFolder();
+      const folderPath = getOutputFolder(normalizedJurisdiction);
       const safeName = `search-${sanitizeFilename(query)}`;
       await page.screenshot({
         path: path.join(folderPath, `${safeName}.jpg`),
         fullPage: true,
       });
-      saveJsonFile(path.join(folderPath, `${safeName}.json`), results);
+      try {
+        saveJsonFile(path.join(folderPath, `${safeName}.json`), results);
+      } catch (err) {
+        console.error("[saveJsonFile] Failed to save JSON:", err);
+        fs.writeFileSync(
+          path.join(folderPath, `${safeName}.json`),
+          JSON.stringify(
+            { error: "Failed to serialize results", details: String(err) },
+            null,
+            2,
+          ),
+          "utf8",
+        );
+      }
       console.log(`[saved] ${folderPath}/${safeName}.{jpg,json}`);
     }
 
     return results;
+  } catch (err) {
+    console.error("[getCompanyByNameOrNumber] Error:", err.message);
+    throw err;
   } finally {
     await browser.close();
+    console.log(
+      "[getCompanyByNameOrNumber] Browser closed for jurisdiction",
+      normalizedJurisdiction,
+    );
   }
 }
 
@@ -295,31 +388,53 @@ async function getCompanyByNameOrNumber(query) {
  * Navigate directly to a company detail URL and return the structured response.
  * Takes a screenshot and saves JSON to ./data/YYYY-MM-DD/.
  */
-async function scrapeByUrl(url) {
-  const { browser, page, config } = await launchPage();
+async function scrapeByUrl(url, jurisdictionCode = DEFAULT_JURISDICTION) {
+  const normalizedJurisdiction = (
+    jurisdictionCode || DEFAULT_JURISDICTION
+  ).toLowerCase();
+  console.log(
+    "[scrapeByUrl] Starting scrape for URL:",
+    url,
+    "jurisdiction",
+    normalizedJurisdiction,
+  );
+  const { browser, page, config } = await launchPage(normalizedJurisdiction);
 
   try {
+    console.log("[scrapeByUrl] Navigating to URL...");
     await page.goto(url, { waitUntil: "networkidle" });
 
     // Capture title before accepting cookies — accepting triggers a full page reload
     const pageTitle = await page.title();
     const companyName = pageTitle.split("|")[0].trim();
+    console.log(
+      "[scrapeByUrl] Page title:",
+      pageTitle,
+      "-> Company name:",
+      companyName,
+    );
 
+    console.log("[scrapeByUrl] Accepting cookies if present...");
     await acceptCookiesIfPresent(page);
     // After cookie acceptance the page reloads — wait for company content to appear
+    console.log("[scrapeByUrl] Waiting for card-body selector...");
     await page.waitForSelector(".card-body", { timeout: 15000 });
     await page.waitForLoadState("networkidle");
+    console.log("[scrapeByUrl] Page loaded and ready");
 
     const html = await page.content();
+    console.log("[scrapeByUrl] Extracting sections from HTML...");
     const sections = extractAllSections(
       html,
       config.wantedSections,
       config.baseUrl,
     );
+    console.log("[scrapeByUrl] Extracted", sections.length, "sections");
     const general = sections.find((s) => s.title === "General information");
     const vat = sections.find((s) => s.title === "VAT information");
 
     // Officers — #representativesTable
+    console.log("[scrapeByUrl] Extracting officers...");
     const officers = await page
       .$$eval("#representativesTable tbody tr", (rows) =>
         rows.map((row) => {
@@ -330,8 +445,10 @@ async function scrapeByUrl(url) {
         }),
       )
       .catch(() => []);
+    console.log("[scrapeByUrl] Extracted", officers.length, "officers");
 
     // Shareholders — table whose first header is "Participation"
+    console.log("[scrapeByUrl] Extracting shareholders...");
     const shareholders = await page
       .$$eval("table", (tables) => {
         for (const table of tables) {
@@ -356,8 +473,10 @@ async function scrapeByUrl(url) {
         return [];
       })
       .catch(() => []);
+    console.log("[scrapeByUrl] Extracted", shareholders.length, "shareholders");
 
     // Beneficial owners — #beneficiaries-table
+    console.log("[scrapeByUrl] Extracting beneficial owners...");
     const ultimate_beneficial_owners = await page
       .$$eval("#beneficiaries-table tbody tr", (rows) =>
         rows.map((row) => {
@@ -373,6 +492,11 @@ async function scrapeByUrl(url) {
         }),
       )
       .catch(() => []);
+    console.log(
+      "[scrapeByUrl] Extracted",
+      ultimate_beneficial_owners.length,
+      "beneficial owners",
+    );
 
     const { fieldMap } = config;
     const result = {
@@ -389,18 +513,39 @@ async function scrapeByUrl(url) {
       shareholders,
     };
 
-    const folderPath = getOutputFolder();
+    const folderPath = getOutputFolder(normalizedJurisdiction);
     const safeName = sanitizeFilename(companyName || "company");
+    console.log("[scrapeByUrl] Saving screenshot and JSON to:", folderPath);
     await page.screenshot({
       path: path.join(folderPath, `${safeName}.jpg`),
       fullPage: true,
     });
-    saveJsonFile(path.join(folderPath, `${safeName}.json`), result);
+    try {
+      saveJsonFile(path.join(folderPath, `${safeName}.json`), result);
+    } catch (err) {
+      console.error("[saveJsonFile] Failed to save JSON:", err);
+      fs.writeFileSync(
+        path.join(folderPath, `${safeName}.json`),
+        JSON.stringify(
+          { error: "Failed to serialize result", details: String(err) },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+    }
     console.log(`[saved] ${folderPath}/${safeName}.{jpg,json}`);
 
     return result;
+  } catch (err) {
+    console.error("[scrapeByUrl] Error:", err.message);
+    throw err;
   } finally {
     await browser.close();
+    console.log(
+      "[scrapeByUrl] Browser closed for jurisdiction",
+      normalizedJurisdiction,
+    );
   }
 }
 
@@ -408,29 +553,54 @@ async function scrapeByUrl(url) {
  * Type a query into the search box and capture the autocomplete dropdown list
  * that appears before the search is submitted. Saves screenshot + JSON to data/.
  */
-async function getAutocompleteSuggestions(query) {
-  const { browser, page, config } = await launchPage();
+async function getAutocompleteSuggestions(
+  query,
+  jurisdictionCode = DEFAULT_JURISDICTION,
+) {
+  const normalizedJurisdiction = (
+    jurisdictionCode || DEFAULT_JURISDICTION
+  ).toLowerCase();
+  console.log(
+    "[getAutocompleteSuggestions] Starting autocomplete for query:",
+    query,
+    "jurisdiction",
+    normalizedJurisdiction,
+  );
+  const { browser, page, config } = await launchPage(normalizedJurisdiction);
 
   try {
+    console.log("[getAutocompleteSuggestions] Navigating to search URL...");
     await page.goto(config.searchUrl, { waitUntil: "networkidle" });
     await acceptCookiesIfPresent(page);
+    console.log("[getAutocompleteSuggestions] Waiting for search input...");
     await page.waitForSelector(config.selectors.searchInput);
 
     // Type character-by-character with a small delay to trigger autocomplete
+    console.log(
+      "[getAutocompleteSuggestions] Clicking search input and typing query...",
+    );
     await page.click(config.selectors.searchInput);
     await page.type(config.selectors.searchInput, query, { delay: 80 });
 
     // Wait for the dropdown to become visible
+    console.log(
+      "[getAutocompleteSuggestions] Waiting for autocomplete dropdown...",
+    );
     try {
       await page.waitForSelector(config.selectors.autocompleteDropdown, {
         state: "visible",
         timeout: 4000,
       });
+      console.log("[getAutocompleteSuggestions] Dropdown appeared");
     } catch {
-      console.log("[autocomplete] No dropdown appeared for query:", query);
+      console.log(
+        "[getAutocompleteSuggestions] No dropdown appeared for query:",
+        query,
+      );
       return [];
     }
 
+    console.log("[getAutocompleteSuggestions] Extracting suggestions...");
     const suggestions = await page
       .$$eval(config.selectors.autocompleteItem, (items) =>
         items
@@ -441,19 +611,48 @@ async function getAutocompleteSuggestions(query) {
           .filter(Boolean),
       )
       .catch(() => []);
+    console.log(
+      "[getAutocompleteSuggestions] Extracted",
+      suggestions.length,
+      "suggestions",
+    );
 
-    const folderPath = getOutputFolder();
+    const folderPath = getOutputFolder(normalizedJurisdiction);
     const safeName = `autocomplete-${sanitizeFilename(query)}`;
+    console.log(
+      "[getAutocompleteSuggestions] Saving screenshot and JSON to:",
+      folderPath,
+    );
     await page.screenshot({
       path: path.join(folderPath, `${safeName}.jpg`),
       fullPage: false,
     });
-    saveJsonFile(path.join(folderPath, `${safeName}.json`), suggestions);
+    try {
+      saveJsonFile(path.join(folderPath, `${safeName}.json`), suggestions);
+    } catch (err) {
+      console.error("[saveJsonFile] Failed to save JSON:", err);
+      fs.writeFileSync(
+        path.join(folderPath, `${safeName}.json`),
+        JSON.stringify(
+          { error: "Failed to serialize suggestions", details: String(err) },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+    }
     console.log(`[saved] ${folderPath}/${safeName}.{jpg,json}`);
 
     return suggestions;
+  } catch (err) {
+    console.error("[getAutocompleteSuggestions] Error:", err.message);
+    throw err;
   } finally {
     await browser.close();
+    console.log(
+      "[getAutocompleteSuggestions] Browser closed for jurisdiction",
+      normalizedJurisdiction,
+    );
   }
 }
 

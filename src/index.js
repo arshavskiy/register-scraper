@@ -3,7 +3,7 @@ import express from "express";
 import companyRoutes from "./routes/company.js";
 
 const app = express();
-const PORT = parseInt(process.env.PORT || "6666", 10);
+const PORT = parseInt(process.env.PORT || "3000", 10);
 
 app.use(express.json());
 app.use("/", companyRoutes);

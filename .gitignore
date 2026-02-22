@@ -15,6 +15,9 @@ build/
 data/
 screen/
 crawler/
+.idea/
+.claude/
+.spacstory/
 *.json
 !package.json
 !package-lock.json

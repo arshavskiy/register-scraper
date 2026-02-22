@@ -6,14 +6,14 @@ A Node.js REST API that wraps the Estonian Business Register scraper and exposes
 
 ## Stack
 
-| Layer | Technology |
-|---|---|
-| Runtime | Node.js |
-| Language | JavaScript (ES modules) |
-| HTTP server | Express |
-| Browser automation | Playwright (Chromium) |
-| HTML parsing | Cheerio |
-| Reverse proxy | Caddy |
+| Layer              | Technology              |
+| ------------------ | ----------------------- |
+| Runtime            | Node.js                 |
+| Language           | JavaScript (ES modules) |
+| HTTP server        | Express                 |
+| Browser automation | Playwright (Chromium)   |
+| HTML parsing       | Cheerio                 |
+| Reverse proxy      | Caddy                   |
 
 ---
 
@@ -21,10 +21,15 @@ A Node.js REST API that wraps the Estonian Business Register scraper and exposes
 
 ```
 register-scraper/
-├── index.js              # Express app entry point
-├── scraper.js            # Playwright + Cheerio scraping logic
-├── routes/
-│   └── company.js        # All POST routes
+├── src/
+│   ├── index.js              # Express app entry point
+│   ├── scraper.js            # Playwright + Cheerio scraping logic
+│   ├── controllers/
+│   │   └── companyController.js  # Request validation + logging
+│   ├── routes/
+│   │   └── company.js        # Router wiring to controllers
+│   └── config/
+│       └── jurisdictions.js  # ISO 3166-1 alpha-2 endpoints
 ├── package.json
 ├── Caddyfile
 └── .env.example
@@ -130,11 +135,11 @@ Content-Type: application/json
 }
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `jurisdiction_code` | string | No | ISO 3166-1 alpha-2 country code (default: `"ee"`) |
-| `company_name` | string | One of these | Partial company name to type |
-| `company_number` | string | One of these | Partial registry code to type |
+| Field               | Type   | Required     | Description                                       |
+| ------------------- | ------ | ------------ | ------------------------------------------------- |
+| `jurisdiction_code` | string | No           | ISO 3166-1 alpha-2 country code (default: `"ee"`) |
+| `company_name`      | string | One of these | Partial company name to type                      |
+| `company_number`    | string | One of these | Partial registry code to type                     |
 
 **Response — 200 OK**
 
@@ -190,11 +195,11 @@ Content-Type: application/json
 }
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `jurisdiction_code` | string | No | ISO 3166-1 alpha-2 country code (default: `"ee"`) |
-| `company_name` | string | One of these | Company name to search |
-| `company_number` | string | One of these | Registry code to search |
+| Field               | Type   | Required     | Description                                       |
+| ------------------- | ------ | ------------ | ------------------------------------------------- |
+| `jurisdiction_code` | string | No           | ISO 3166-1 alpha-2 country code (default: `"ee"`) |
+| `company_name`      | string | One of these | Company name to search                            |
+| `company_number`    | string | One of these | Registry code to search                           |
 
 At least one of `company_name` or `company_number` must be provided. If both are given, `company_name` takes precedence.
 
@@ -246,10 +251,10 @@ Content-Type: application/json
 }
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `jurisdiction_code` | string | No | ISO 3166-1 alpha-2 country code (default: `"ee"`) |
-| `url` | string | Yes | Full URL of the company detail page |
+| Field               | Type   | Required | Description                                       |
+| ------------------- | ------ | -------- | ------------------------------------------------- |
+| `jurisdiction_code` | string | No       | ISO 3166-1 alpha-2 country code (default: `"ee"`) |
+| `url`               | string | Yes      | Full URL of the company detail page               |
 
 > Tip: get the URL from `POST /getCompanyByNameOrNumber` → `results[n].url`
 
@@ -326,28 +331,71 @@ curl -X POST http://localhost:3000/getCompleteInfo \
 
 ---
 
+## cURL examples
+
+Use the following commands to exercise each endpoint directly from a terminal:
+
+### Autocomplete suggestions (Estonia)
+
+```bash
+curl -X POST http://localhost:3000/getAutocompleteSuggestions \
+  -H "Content-Type: application/json" \
+  -d '{"jurisdiction_code":"ee","company_name":"abc"}'
+```
+
+### Search by company name or number (Latvia)
+
+```bash
+curl -X POST http://localhost:3000/getCompanyByNameOrNumber \
+  -H "Content-Type: application/json" \
+  -d '{"jurisdiction_code":"lv","company_name":"Latvijas Zenit V"}'
+```
+
+### Full detail page crawl (Estonia)
+
+```bash
+curl -X POST http://localhost:3000/getCompleteInfo \
+  -H "Content-Type: application/json" \
+  -d '{"jurisdiction_code":"ee","url":"https://ariregister.rik.ee/eng/company/14532901/Bolt-Operations-O%C3%9C"}'
+```
+
 ## Configuration
 
 All options are set via `.env`:
 
-| Variable | Default | Description |
-|---|---|---|
-| `PORT` | `3000` | HTTP port the server listens on |
-| `BASE_URL` | `https://ariregister.rik.ee` | Registry base URL |
-| `SEARCH_URL` | `https://ariregister.rik.ee/eng` | Search page URL |
-| `DATA_FOLDER` | `../data` | Output folder for screenshots and JSON |
-| `BROWSER_HEADLESS` | `true` | Set to `false` to watch the browser |
-| `USER_AGENT` | Chrome 131 UA string | Browser user agent |
-| `SELECTOR_SEARCH_INPUT` | `input#company_search` | Search field selector |
-| `SELECTOR_SEARCH_BUTTON` | `button.btn-search` | Search submit button selector |
-| `SELECTOR_AUTOCOMPLETE_DROPDOWN` | `.typeahead[role='listbox']` | Autocomplete dropdown container |
-| `SELECTOR_AUTOCOMPLETE_ITEM` | `.typeahead [role='option']` | Autocomplete item selector |
-| `WANTED_SECTIONS` | all 12 sections | Comma-separated list of sections to extract |
-| `FIELD_REGISTRY_CODE` | `Registry code` | Label for the company number field |
-| `FIELD_VAT_NUMBER` | `VAT number` | Label for the VAT / jurisdiction identifier field |
-| `FIELD_INCORPORATED` | `Registered` | Label for the incorporation date field |
-| `FIELD_LEGAL_FORM` | `Legal form` | Label for the company type field |
-| `FIELD_STATUS` | `Status` | Label for the current status field |
+| Variable                         | Default                          | Description                                       |
+| -------------------------------- | -------------------------------- | ------------------------------------------------- |
+| `PORT`                           | `3000`                           | HTTP port the server listens on                   |
+| `BASE_URL`                       | `https://ariregister.rik.ee`     | Registry base URL                                 |
+| `SEARCH_URL`                     | `https://ariregister.rik.ee/eng` | Search page URL                                   |
+| `DATA_FOLDER`                    | `../data`                        | Output folder for screenshots and JSON            |
+| `BROWSER_HEADLESS`               | `true`                           | Set to `false` to watch the browser               |
+| `USER_AGENT`                     | Chrome 131 UA string             | Browser user agent                                |
+| `SELECTOR_SEARCH_INPUT`          | `input#company_search`           | Search field selector                             |
+| `SELECTOR_SEARCH_BUTTON`         | `button.btn-search`              | Search submit button selector                     |
+| `SELECTOR_AUTOCOMPLETE_DROPDOWN` | `.typeahead[role='listbox']`     | Autocomplete dropdown container                   |
+| `SELECTOR_AUTOCOMPLETE_ITEM`     | `.typeahead [role='option']`     | Autocomplete item selector                        |
+| `WANTED_SECTIONS`                | all 12 sections                  | Comma-separated list of sections to extract       |
+| `FIELD_REGISTRY_CODE`            | `Registry code`                  | Label for the company number field                |
+| `FIELD_VAT_NUMBER`               | `VAT number`                     | Label for the VAT / jurisdiction identifier field |
+| `FIELD_INCORPORATED`             | `Registered`                     | Label for the incorporation date field            |
+| `FIELD_LEGAL_FORM`               | `Legal form`                     | Label for the company type field                  |
+| `FIELD_STATUS`                   | `Status`                         | Label for the current status field                |
+
+---
+
+## Jurisdictions
+
+The scraper resolves the correct registry URLs per ISO 3166-1 alpha-2 code using `src/config/jurisdictions.js`. The list shipped with the project covers all Baltic registries we support today:
+
+| Code | Description       | Base URL                       | Search URL                                 |
+| ---- | ----------------- | ------------------------------ | ------------------------------------------ |
+| `ee` | Estonia (default) | https://ariregister.rik.ee     | https://ariregister.rik.ee/eng             |
+| `lv` | Latvia            | https://www.ur.gov.lv          | https://www.ur.gov.lv/lv/search            |
+| `lt` | Lithuania         | https://www.registrucentras.lt | https://www.registrucentras.lt/jar/paieska |
+| `fi` | Finland           | https://www.ytj.fi             | https://www.ytj.fi/en/yrityshaku           |
+
+Adding or overriding a code is as easy as editing that file and declaring a new `baseUrl` / `searchUrl` pair; the scraper automatically picks up the new code as soon as you redeploy.
 
 ---
 
@@ -359,8 +407,8 @@ All errors follow the same shape:
 { "error": "Human-readable message.", "details": "Optional stack or cause." }
 ```
 
-| Status | Meaning |
-|---|---|
-| `400` | Missing or invalid request body field |
-| `404` | No results found for the given query |
-| `500` | Scraper error (network, selector change, timeout) |
+| Status | Meaning                                           |
+| ------ | ------------------------------------------------- |
+| `400`  | Missing or invalid request body field             |
+| `404`  | No results found for the given query              |
+| `500`  | Scraper error (network, selector change, timeout) |
