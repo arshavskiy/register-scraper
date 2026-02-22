@@ -9,7 +9,7 @@ A Node.js REST API that wraps the Estonian Business Register scraper and exposes
 | Layer | Technology |
 |---|---|
 | Runtime | Node.js |
-| Language | JavaScript (CommonJS) |
+| Language | JavaScript (ES modules) |
 | HTTP server | Express |
 | Browser automation | Playwright (Chromium) |
 | HTML parsing | Cheerio |
@@ -20,21 +20,24 @@ A Node.js REST API that wraps the Estonian Business Register scraper and exposes
 ## Project Structure
 
 ```
-server/
-├── src/
-│   ├── index.js          # Express app entry point
-│   ├── scraper.js        # Playwright + Cheerio scraping logic
-│   └── routes/
-│       └── company.js    # POST /getCompanyByNameOrNumber, POST /getCompleteInfo
+register-scraper/
+├── index.js              # Express app entry point
+├── scraper.js            # Playwright + Cheerio scraping logic
+├── routes/
+│   └── company.js        # All POST routes
 ├── package.json
 ├── Caddyfile
 └── .env.example
 
-# Output is written to the shared project data folder:
-../data/
+# Output is written to the data folder:
+data/
 └── YYYY-MM-DD/
-    ├── CompanyName.jpg   ← full-page screenshot
-    └── CompanyName.json  ← structured JSON result
+    ├── search-<query>.jpg          ← search results screenshot
+    ├── search-<query>.json         ← search results list
+    ├── autocomplete-<query>.jpg    ← autocomplete dropdown screenshot
+    ├── autocomplete-<query>.json   ← autocomplete suggestions list
+    ├── CompanyName.jpg             ← full-page company screenshot
+    └── CompanyName.json            ← structured company JSON
 ```
 
 ---
@@ -44,7 +47,6 @@ server/
 ### 1. Install dependencies
 
 ```bash
-cd server
 npm install
 ```
 
@@ -107,14 +109,74 @@ GET /health
 **Response**
 
 ```json
-{ "status": "ok", "timestamp": "2026-02-21T10:00:00.000Z" }
+{ "status": "ok", "timestamp": "2026-02-22T10:00:00.000Z" }
+```
+
+---
+
+### POST /getAutocompleteSuggestions
+
+Type a partial name into the search box and return the live autocomplete dropdown suggestions. Saves a viewport screenshot and JSON to `data/YYYY-MM-DD/`.
+
+**Request**
+
+```http
+POST /getAutocompleteSuggestions
+Content-Type: application/json
+
+{
+  "jurisdiction_code": "ee",
+  "company_name": "abc"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `jurisdiction_code` | string | No | ISO 3166-1 alpha-2 country code (default: `"ee"`) |
+| `company_name` | string | One of these | Partial company name to type |
+| `company_number` | string | One of these | Partial registry code to type |
+
+**Response — 200 OK**
+
+```json
+{
+  "jurisdiction_code": "ee",
+  "query": "abc",
+  "suggestions": [
+    { "text": "ABC Abiteenused OÜ" },
+    { "text": "ABC Aknad OÜ" },
+    { "text": "ABC Arve OÜ" },
+    { "text": "ABC Arveldused OÜ" },
+    { "text": "Abc Asfalt OÜ" },
+    { "text": "ABC AUTO GRUPP OÜ" },
+    { "text": "ABC Autokool OÜ" },
+    { "text": "ABC Autoteenindus OÜ" },
+    { "text": "OÜ ABC Analytics" },
+    { "text": "OÜ ABC Antenn" }
+  ]
+}
+```
+
+**Response — 404 Not Found**
+
+```json
+{ "error": "No autocomplete suggestions found.", "query": "abc" }
+```
+
+**Saved files**
+
+```
+data/
+└── 2026-02-22/
+    ├── autocomplete-abc.jpg    ← viewport screenshot with dropdown open
+    └── autocomplete-abc.json  ← suggestions list
 ```
 
 ---
 
 ### POST /getCompanyByNameOrNumber
 
-Search the Estonian Business Register by company name or registry code. Returns a list of matching companies.
+Submit a full search and return all matching companies from the results page. Saves a full-page screenshot and JSON to `data/YYYY-MM-DD/`.
 
 **Request**
 
@@ -157,11 +219,20 @@ At least one of `company_name` or `company_number` must be provided. If both are
 { "error": "No companies found.", "query": "..." }
 ```
 
+**Saved files**
+
+```
+data/
+└── 2026-02-22/
+    ├── search-BOLT OPERATIONS OÜ.jpg    ← full-page search results screenshot
+    └── search-BOLT OPERATIONS OÜ.json  ← results list
+```
+
 ---
 
 ### POST /getCompleteInfo
 
-Navigate directly to a company detail page by URL. Extracts structured data, saves a full-page screenshot and a JSON file to `../data/YYYY-MM-DD/`.
+Navigate directly to a company detail page by URL. Extracts structured data, saves a full-page screenshot and a JSON file to `data/YYYY-MM-DD/`.
 
 **Request**
 
@@ -207,11 +278,6 @@ Content-Type: application/json
       "name": "Ahto Kink",
       "position": "Management board member",
       "entityType": null
-    },
-    {
-      "name": "Vincent Roland Pickering",
-      "position": "Management board member",
-      "entityType": null
     }
   ],
   "shareholders": [
@@ -228,31 +294,32 @@ Content-Type: application/json
 
 **Saved files**
 
-Every successful call writes two files to the shared project data folder:
-
 ```
-../data/
-└── 2026-02-21/
+data/
+└── 2026-02-22/
     ├── Bolt Operations OÜ.jpg    ← full-page screenshot
     └── Bolt Operations OÜ.json  ← structured JSON result
 ```
 
 ---
 
-## Typical two-step workflow
+## Typical workflow
 
 ```bash
-# Step 1 — find the company and get its URL
+# Step 0 (optional) — get autocomplete suggestions while typing
+printf '{"jurisdiction_code":"ee","company_name":"abc"}' > q.json
+curl -X POST http://localhost:3000/getAutocompleteSuggestions \
+     -H "Content-Type: application/json" -d @q.json
+
+# Step 1 — submit search and get the company URL
 printf '{"jurisdiction_code":"ee","company_name":"BOLT OPERATIONS O\xc3\x9c"}' > search.json
 curl -X POST http://localhost:3000/getCompanyByNameOrNumber \
-     -H "Content-Type: application/json; charset=utf-8" \
-     -d @search.json
+     -H "Content-Type: application/json; charset=utf-8" -d @search.json
 
 # Step 2 — fetch full details using the URL from step 1
 printf '{"jurisdiction_code":"ee","url":"https://ariregister.rik.ee/eng/company/14532901/Bolt-Operations-O%%C3%%9C"}' > detail.json
 curl -X POST http://localhost:3000/getCompleteInfo \
-     -H "Content-Type: application/json; charset=utf-8" \
-     -d @detail.json
+     -H "Content-Type: application/json; charset=utf-8" -d @detail.json
 ```
 
 > On Windows (Git Bash), write the payload to a file using `printf` to preserve UTF-8 encoding, then pass the file with `-d @file`.
@@ -273,6 +340,8 @@ All options are set via `.env`:
 | `USER_AGENT` | Chrome 131 UA string | Browser user agent |
 | `SELECTOR_SEARCH_INPUT` | `input#company_search` | Search field selector |
 | `SELECTOR_SEARCH_BUTTON` | `button.btn-search` | Search submit button selector |
+| `SELECTOR_AUTOCOMPLETE_DROPDOWN` | `.typeahead[role='listbox']` | Autocomplete dropdown container |
+| `SELECTOR_AUTOCOMPLETE_ITEM` | `.typeahead [role='option']` | Autocomplete item selector |
 | `WANTED_SECTIONS` | all 12 sections | Comma-separated list of sections to extract |
 | `FIELD_REGISTRY_CODE` | `Registry code` | Label for the company number field |
 | `FIELD_VAT_NUMBER` | `VAT number` | Label for the VAT / jurisdiction identifier field |
@@ -293,5 +362,5 @@ All errors follow the same shape:
 | Status | Meaning |
 |---|---|
 | `400` | Missing or invalid request body field |
-| `404` | No company found for the given query |
+| `404` | No results found for the given query |
 | `500` | Scraper error (network, selector change, timeout) |
