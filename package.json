@@ -7,7 +7,12 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
-    "test": "node ./test_routes.js"
+    "start:dist": "node dist/server.js",
+    "test": "node ./test_routes.js",
+    "preflight": "node scripts/preflight.js",
+    "build": "node scripts/preflight.js && node scripts/build.js",
+    "docker:build": "docker build -t register-scraper .",
+    "docker:run": "docker run --env-file .env -p ${PORT:-3000}:${PORT:-3000} -v \"$(pwd)/../data\":/data register-scraper"
   },
   "keywords": [],
   "author": "",
@@ -18,5 +23,8 @@
     "express": "^4.18.2",
     "node-fetch": "^3.3.2",
     "playwright": "^1.58.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.3"
   }
 }

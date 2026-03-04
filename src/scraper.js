@@ -5,7 +5,7 @@ import {fileURLToPath} from "url";
 import JURISDICTION_ADAPTERS from "../config/jurisdictions.js";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// const __dirname = path.dirname(__filename);
 const DEFAULT_JURISDICTION = "ee";
 
 // ============================================================================
@@ -116,23 +116,33 @@ async function getCompanyByNameOrNumber(query, jurisdictionCode = DEFAULT_JURISD
     const {browser, page} = await launchPage(adapter);
 
     try {
-        await runSearch(page, adapter, query);
-        console.log("[getCompanyByNameOrNumber] Search executed, waiting for results...", jCode);
+        // Adapters that provide a searchViaApi method bypass Playwright HTML parsing
+        // and call the registry's JSON API directly from inside the browser context.
+        let results;
+        if (typeof adapter.searchViaApi === "function") {
+            console.log("[getCompanyByNameOrNumber] Using API search for jurisdiction", jCode);
+            await page.goto(adapter.searchUrl, {waitUntil: "networkidle"});
+            results = await adapter.searchViaApi(page, query);
+            console.log("[getCompanyByNameOrNumber] API returned", results.length, "results", jCode);
+        } else {
+            await runSearch(page, adapter, query);
+            console.log("[getCompanyByNameOrNumber] Search executed, waiting for results...", jCode);
 
-        try {
-            await Promise.any([
-                page.waitForSelector("a.h2.text-primary", {state: "attached", timeout: 5000}),
-                page.waitForSelector("table tbody tr", {state: "attached", timeout: 5000}),
-            ]);
-            console.log("[getCompanyByNameOrNumber] Results found on page");
-        } catch {
-            console.log("[getCompanyByNameOrNumber] No results found (timeout waiting for results)", jCode);
-            return [];
+            try {
+                await Promise.any([
+                    page.waitForSelector("a.h2.text-primary", {state: "attached", timeout: 5000}),
+                    page.waitForSelector("table tbody tr", {state: "attached", timeout: 5000}),
+                ]);
+                console.log("[getCompanyByNameOrNumber] Results found on page");
+            } catch {
+                console.log("[getCompanyByNameOrNumber] No results found (timeout waiting for results)", jCode);
+                return [];
+            }
+
+            const html = await page.content();
+            results = adapter.extractSearchResults(html);
+            console.log("[getCompanyByNameOrNumber] Extracted", results.length, "results", jCode);
         }
-
-        const html = await page.content();
-        const results = adapter.extractSearchResults(html);
-        console.log("[getCompanyByNameOrNumber] Extracted", results.length, "results", jCode);
 
         if (results.length > 0) {
             const folderPath = getOutputFolder(jCode);
@@ -173,88 +183,15 @@ async function scrapeByUrl(url, jurisdictionCode = DEFAULT_JURISDICTION) {
 
         console.log("[scrapeByUrl] Accepting cookies if present...");
         await acceptCookiesIfPresent(page);
-        console.log("[scrapeByUrl] Waiting for card-body selector...");
-        await page.waitForSelector(".card-body", {timeout: 15000});
+        console.log("[scrapeByUrl] Waiting for detail page selector:", adapter.detailReadySelector);
+        await page.waitForSelector(adapter.detailReadySelector, {timeout: 15000});
         await page.waitForLoadState("networkidle");
         console.log("[scrapeByUrl] Page loaded and ready");
 
         const html = await page.content();
-        console.log("[scrapeByUrl] Extracting sections from HTML...");
-        const sections = adapter.extractCompanyDetail(html);
-        console.log("[scrapeByUrl] Extracted", sections.length, "sections");
-
-        const general = sections.find((s) => s.title === "General information");
-        const vat = sections.find((s) => s.title === "VAT information");
-
-        // Officers — #representativesTable
-        console.log("[scrapeByUrl] Extracting officers...");
-        const officers = await page
-            .$$eval("#representativesTable tbody tr", (rows) =>
-                rows.map((row) => {
-                    const cells = [...row.querySelectorAll("td")].map((td) => td.textContent?.trim() ?? "");
-                    return {name: cells[0], position: cells[2], entityType: null};
-                }),
-            )
-            .catch(() => []);
-        console.log("[scrapeByUrl] Extracted", officers.length, "officers");
-
-        // Shareholders
-        console.log("[scrapeByUrl] Extracting shareholders...");
-        const shareholders = await page
-            .$$eval("table", (tables) => {
-                for (const table of tables) {
-                    const headers = [...(table.querySelector("thead")?.querySelectorAll("th") ?? [])].map((th) => th.textContent?.trim());
-                    if (headers[0] !== "Participation") continue;
-                    return [...table.querySelectorAll("tbody tr")].map((row) => {
-                        const cells = [...row.querySelectorAll("td")].map((td) => td.textContent?.trim().replace(/\s+/g, " ") ?? "");
-                        const contribMatch = cells[1]?.match(/^[\d.,]+\s+EUR\s+(.*)/);
-                        return {
-                            name: cells[2] ?? "",
-                            shares: cells[0] ?? "",
-                            shareCount: null,
-                            entityType: null,
-                            type_of_control: contribMatch?.[1]?.trim() ?? cells[1] ?? "",
-                        };
-                    });
-                }
-                return [];
-            })
-            .catch(() => []);
-        console.log("[scrapeByUrl] Extracted", shareholders.length, "shareholders");
-
-        // Beneficial owners
-        console.log("[scrapeByUrl] Extracting beneficial owners...");
-        const ultimate_beneficial_owners = await page
-            .$$eval("#beneficiaries-table tbody tr", (rows) =>
-                rows.map((row) => {
-                    const cells = [...row.querySelectorAll("td")].map((td) => td.textContent?.trim().replace(/\s+/g, " ") ?? "");
-                    return {name: cells[0], position: null, entityType: null, type_of_control: cells[2]};
-                }),
-            )
-            .catch(() => []);
-        console.log("[scrapeByUrl] Extracted", ultimate_beneficial_owners.length, "beneficial owners");
-
-        const fieldMap = {
-            registryCode: process.env.FIELD_REGISTRY_CODE || "Registry code",
-            vatNumber: process.env.FIELD_VAT_NUMBER || "VAT number",
-            incorporated: process.env.FIELD_INCORPORATED || "Registered",
-            legalForm: process.env.FIELD_LEGAL_FORM || "Legal form",
-            status: process.env.FIELD_STATUS || "Status",
-        };
-
-        const result = {
-            company_name: companyName,
-            company_number: general?.fields[fieldMap.registryCode] ?? "",
-            jurisdiction_ident: vat?.fields[fieldMap.vatNumber] ?? "",
-            incorporation_date: general?.fields[fieldMap.incorporated] ?? "",
-            dissolution_date: "",
-            company_type: general?.fields[fieldMap.legalForm] ?? "",
-            current_status: general?.fields[fieldMap.status] ?? "",
-            more_info_available: sections.length > 0,
-            ultimate_beneficial_owners,
-            officers,
-            shareholders,
-        };
+        console.log("[scrapeByUrl] Delegating extraction to adapter:", adapter.constructor.name);
+        const result = await adapter.extractCompanyResult(page, html, companyName);
+        console.log("[scrapeByUrl] Extraction complete");
 
         const folderPath = getOutputFolder(jCode);
         const safeName = sanitizeFilename(companyName || "company");

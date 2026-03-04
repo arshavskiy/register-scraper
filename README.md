@@ -1,6 +1,6 @@
-# Estonian Business Register — API Server
+# Business Register Scraper — API Server
 
-A Node.js REST API that wraps the Estonian Business Register scraper and exposes it over HTTP. Designed to run behind a **Caddy** reverse proxy.
+A Node.js REST API that scrapes national business registries and exposes the data over HTTP. Each supported country has its own **jurisdiction adapter** that encapsulates all registry-specific HTML parsing logic. Designed to run behind a **Caddy** reverse proxy or as a **Docker** container.
 
 ---
 
@@ -8,11 +8,13 @@ A Node.js REST API that wraps the Estonian Business Register scraper and exposes
 
 | Layer              | Technology              |
 | ------------------ | ----------------------- |
-| Runtime            | Node.js                 |
+| Runtime            | Node.js 22              |
 | Language           | JavaScript (ES modules) |
 | HTTP server        | Express                 |
 | Browser automation | Playwright (Chromium)   |
 | HTML parsing       | Cheerio                 |
+| Bundler            | esbuild                 |
+| Container          | Docker (multi-stage)    |
 | Reverse proxy      | Caddy                   |
 
 ---
@@ -22,28 +24,84 @@ A Node.js REST API that wraps the Estonian Business Register scraper and exposes
 ```
 register-scraper/
 ├── src/
-│   ├── index.js              # Express app entry point
-│   ├── scraper.js            # Playwright + Cheerio scraping logic
+│   ├── index.js                  # Express app entry point
+│   ├── scraper.js                # Playwright orchestration (browser, search, save)
 │   ├── controllers/
-│   │   └── companyController.js  # Request validation + logging
+│   │   └── companyController.js  # Request validation + response shaping
 │   ├── routes/
-│   │   └── company.js        # Router wiring to controllers
-│   └── config/
-│       └── jurisdictions.js  # ISO 3166-1 alpha-2 endpoints
-├── package.json
+│   │   └── company.js            # Route wiring
+│   └── jurisdictions/            # One adapter file per country
+│       ├── base.js               # Abstract base class (interface contract)
+│       ├── ee.js                 # Estonia — fully implemented
+│       ├── lv.js                 # Latvia — stub
+│       ├── lt.js                 # Lithuania — stub
+│       ├── fi.js                 # Finland — stub
+│       ├── se.js                 # Sweden — stub
+│       ├── dk.js                 # Denmark — stub
+│       ├── no.js                 # Norway — stub
+│       ├── de.js                 # Germany — stub
+│       └── pl.js                 # Poland — stub
+├── config/
+│   └── jurisdictions.js          # Registry of adapter instances (keyed by ISO code)
+├── scripts/
+│   ├── build.js                  # esbuild bundle script → dist/server.js
+│   └── preflight.js              # Pre-deploy validation (adapters, env, disk)
+├── dist/                         # Bundle output (git-ignored)
+│   └── server.js
+├── Dockerfile                    # Two-stage build (builder + slim runtime)
 ├── Caddyfile
+├── package.json
 └── .env.example
 
 # Output is written to the data folder:
 data/
 └── YYYY-MM-DD/
-    ├── search-<query>.jpg          ← search results screenshot
-    ├── search-<query>.json         ← search results list
-    ├── autocomplete-<query>.jpg    ← autocomplete dropdown screenshot
-    ├── autocomplete-<query>.json   ← autocomplete suggestions list
-    ├── CompanyName.jpg             ← full-page company screenshot
-    └── CompanyName.json            ← structured company JSON
+    └── <jurisdiction>/
+        ├── search-<query>.jpg          ← search results screenshot
+        ├── search-<query>.json         ← search results list
+        ├── autocomplete-<query>.jpg    ← autocomplete dropdown screenshot
+        ├── autocomplete-<query>.json   ← autocomplete suggestions list
+        ├── CompanyName.jpg             ← full-page company screenshot
+        └── CompanyName.json            ← structured company JSON
 ```
+
+---
+
+## Architecture
+
+### Jurisdiction adapters
+
+All registry-specific logic lives in `src/jurisdictions/<code>.js`. The scraper (`scraper.js`) contains only generic Playwright orchestration — it never references a registry's HTML directly. Instead, it resolves the right adapter at runtime and delegates:
+
+```
+Request
+  └─► companyController.js   validates input, calls scraper functions
+        └─► scraper.js        launches browser, navigates, waits for page
+              └─► adapter     extractSearchResults(html)
+                              extractCompanyDetail(html)
+                              extractCompanyResult(page, html, companyName)
+                              extractAutocompleteSuggestions(page)
+```
+
+Each adapter extends `BaseJurisdictionAdapter` and must provide:
+
+| Member | Type | Description |
+| --- | --- | --- |
+| `baseUrl` | getter | Registry root URL |
+| `searchUrl` | getter | Search page URL |
+| `selectors` | getter | `{ searchInput, searchButton, autocompleteDropdown, autocompleteItem }` |
+| `detailReadySelector` | getter | CSS selector to wait for before extracting detail HTML |
+| `extractSearchResults(html)` | method | Parse search results page → `[{ name, registryCode, status, address, url }]` |
+| `extractCompanyDetail(html)` | method | Parse detail page into raw sections (used internally by `extractCompanyResult`) |
+| `extractCompanyResult(page, html, companyName)` | async method | Assemble final structured company object (may use live `page` for JS-rendered tables) |
+| `extractAutocompleteSuggestions(page)` | async method | Return autocomplete suggestions; base returns `[]` |
+
+### Adding a new jurisdiction
+
+1. Create `src/jurisdictions/<code>.js` extending `BaseJurisdictionAdapter`
+2. Register it in `config/jurisdictions.js`
+3. Add it to `FULLY_IMPLEMENTED` in `scripts/preflight.js` once complete
+4. Run `npm run build` — preflight will fail if any required method is missing
 
 ---
 
@@ -67,7 +125,7 @@ npx playwright install chromium
 cp .env.example .env
 ```
 
-Edit `.env` as needed — defaults work out of the box.
+Edit `.env` as needed — defaults work out of the box for Estonia.
 
 ---
 
@@ -79,10 +137,17 @@ Edit `.env` as needed — defaults work out of the box.
 npm run dev
 ```
 
-### Production
+### Production (source)
 
 ```bash
 npm start
+```
+
+### Production (bundled)
+
+```bash
+npm run build        # runs preflight + esbuild → dist/server.js
+npm run start:dist   # node dist/server.js
 ```
 
 ### With Caddy (reverse proxy)
@@ -100,6 +165,48 @@ api.example.com {
     reverse_proxy localhost:3000
 }
 ```
+
+### Docker
+
+```bash
+npm run docker:build   # docker build -t register-scraper .
+npm run docker:run     # docker run -p 3000:3000 -v $(pwd)/../data:/data register-scraper
+```
+
+The Docker build automatically runs `preflight` and `build` inside the container before creating the runtime image. The final image is a slim Node 22 + Chromium container — no dev dependencies or source files are included.
+
+---
+
+## Build
+
+### `npm run preflight`
+
+Validates the project before bundling or deploying:
+
+1. **Environment variables** — checks `PORT`, `BROWSER_HEADLESS`, `DATA_FOLDER` (warns if unset, uses defaults)
+2. **Adapter coverage** — for every registered jurisdiction, verifies that all required methods are overridden (not base stubs)
+   - `✓` implemented
+   - `⚠` stub (warning — jurisdiction will throw at runtime if called)
+   - `✗` broken (hard fail — blocks the build)
+3. **Selectors** — verifies `searchInput` and `searchButton` are defined per adapter
+4. **Data folder** — creates the output folder if missing and confirms it is writable
+
+Stubs (`⚠`) are expected for jurisdictions not yet implemented. Adding a code to `FULLY_IMPLEMENTED` in `scripts/preflight.js` promotes its stubs to hard errors.
+
+### `npm run build`
+
+Runs `preflight` then bundles the server with **esbuild**:
+
+- Entry point: `src/index.js`
+- Output: `dist/server.js` (~3.8 MB, single ESM file)
+- Playwright and Node built-ins are marked external (must be installed alongside the bundle)
+
+### Dockerfile (two-stage)
+
+| Stage | Base | What it does |
+| --- | --- | --- |
+| `builder` | `node:22-slim` | `npm ci` → `preflight` → `esbuild` bundle |
+| `runtime` | `node:22-slim` | installs Chromium via Playwright, copies `dist/server.js` only |
 
 ---
 
@@ -173,8 +280,9 @@ Content-Type: application/json
 ```
 data/
 └── 2026-02-22/
-    ├── autocomplete-abc.jpg    ← viewport screenshot with dropdown open
-    └── autocomplete-abc.json  ← suggestions list
+    └── ee/
+        ├── autocomplete-abc.jpg    ← viewport screenshot with dropdown open
+        └── autocomplete-abc.json  ← suggestions list
 ```
 
 ---
@@ -183,7 +291,7 @@ data/
 
 Submit a full search and return all matching companies from the results page. Saves a full-page screenshot and JSON to `data/YYYY-MM-DD/`.
 
-Handles both result layouts used by the Estonian registry:
+The Estonia adapter handles two result layouts automatically:
 - **Card layout** — exact matches or small result sets
 - **Table layout** — broad queries that return many results (e.g. `"OPERATIONS"`)
 
@@ -253,8 +361,9 @@ Always returns an object with `query`, `count`, and `results` array — regardle
 ```
 data/
 └── 2026-02-22/
-    ├── search-BOLT OPERATIONS OÜ.jpg    ← full-page search results screenshot
-    └── search-BOLT OPERATIONS OÜ.json  ← results list
+    └── ee/
+        ├── search-BOLT OPERATIONS OÜ.jpg    ← full-page search results screenshot
+        └── search-BOLT OPERATIONS OÜ.json  ← results list
 ```
 
 ---
@@ -326,8 +435,9 @@ Content-Type: application/json
 ```
 data/
 └── 2026-02-22/
-    ├── Bolt Operations OÜ.jpg    ← full-page screenshot
-    └── Bolt Operations OÜ.json  ← structured JSON result
+    └── ee/
+        ├── Bolt Operations OÜ.jpg    ← full-page screenshot
+        └── Bolt Operations OÜ.json  ← structured JSON result
 ```
 
 ---
@@ -357,8 +467,6 @@ curl -X POST http://localhost:3000/getCompleteInfo \
 
 ## cURL examples
 
-Use the following commands to exercise each endpoint directly from a terminal:
-
 ### Autocomplete suggestions (Estonia)
 
 ```bash
@@ -367,12 +475,12 @@ curl -X POST http://localhost:3000/getAutocompleteSuggestions \
   -d '{"jurisdiction_code":"ee","company_name":"abc"}'
 ```
 
-### Search by company name or number (Latvia)
+### Search by company name or number (Estonia)
 
 ```bash
 curl -X POST http://localhost:3000/getCompanyByNameOrNumber \
   -H "Content-Type: application/json" \
-  -d '{"jurisdiction_code":"lv","company_name":"Latvijas Zenit V"}'
+  -d '{"jurisdiction_code":"ee","company_name":"Bolt Operations"}'
 ```
 
 ### Full detail page crawl (Estonia)
@@ -383,43 +491,47 @@ curl -X POST http://localhost:3000/getCompleteInfo \
   -d '{"jurisdiction_code":"ee","url":"https://ariregister.rik.ee/eng/company/14532901/Bolt-Operations-O%C3%9C"}'
 ```
 
+---
+
 ## Configuration
 
 All options are set via `.env`:
 
-| Variable                         | Default                          | Description                                       |
-| -------------------------------- | -------------------------------- | ------------------------------------------------- |
-| `PORT`                           | `3000`                           | HTTP port the server listens on                   |
-| `BASE_URL`                       | `https://ariregister.rik.ee`     | Registry base URL                                 |
-| `SEARCH_URL`                     | `https://ariregister.rik.ee/eng` | Search page URL                                   |
-| `DATA_FOLDER`                    | `../data`                        | Output folder for screenshots and JSON            |
-| `BROWSER_HEADLESS`               | `true`                           | Set to `false` to watch the browser               |
-| `USER_AGENT`                     | Chrome 131 UA string             | Browser user agent                                |
-| `SELECTOR_SEARCH_INPUT`          | `input#company_search`           | Search field selector                             |
-| `SELECTOR_SEARCH_BUTTON`         | `button.btn-search`              | Search submit button selector                     |
-| `SELECTOR_AUTOCOMPLETE_DROPDOWN` | `.typeahead[role='listbox']`     | Autocomplete dropdown container                   |
-| `SELECTOR_AUTOCOMPLETE_ITEM`     | `.typeahead [role='option']`     | Autocomplete item selector                        |
-| `WANTED_SECTIONS`                | all 12 sections                  | Comma-separated list of sections to extract       |
-| `FIELD_REGISTRY_CODE`            | `Registry code`                  | Label for the company number field                |
-| `FIELD_VAT_NUMBER`               | `VAT number`                     | Label for the VAT / jurisdiction identifier field |
-| `FIELD_INCORPORATED`             | `Registered`                     | Label for the incorporation date field            |
-| `FIELD_LEGAL_FORM`               | `Legal form`                     | Label for the company type field                  |
-| `FIELD_STATUS`                   | `Status`                         | Label for the current status field                |
+| Variable             | Default      | Description                                         |
+| -------------------- | ------------ | --------------------------------------------------- |
+| `PORT`               | `3000`       | HTTP port the server listens on                     |
+| `DATA_FOLDER`        | `../data`    | Output folder for screenshots and JSON              |
+| `BROWSER_HEADLESS`   | `true`       | Set to `false` to watch the browser during scraping |
+| `USER_AGENT`         | Chrome 131   | Browser user agent string                           |
+| `FIELD_REGISTRY_CODE`| `Registry code` | Label for the company number field (EE)          |
+| `FIELD_VAT_NUMBER`   | `VAT number` | Label for the VAT identifier field (EE)             |
+| `FIELD_INCORPORATED` | `Registered` | Label for the incorporation date field (EE)         |
+| `FIELD_LEGAL_FORM`   | `Legal form` | Label for the company type field (EE)               |
+| `FIELD_STATUS`       | `Status`     | Label for the current status field (EE)             |
+| `WANTED_SECTIONS`    | all 12       | Comma-separated list of detail sections to extract (EE) |
+
+> CSS selectors (`SELECTOR_*`) are no longer global env vars — they are defined per adapter in `src/jurisdictions/<code>.js`.
 
 ---
 
 ## Jurisdictions
 
-The scraper resolves the correct registry URLs per ISO 3166-1 alpha-2 code using `src/config/jurisdictions.js`. The list shipped with the project covers all Baltic registries we support today:
+Each jurisdiction is a self-contained adapter in `src/jurisdictions/`. The registry of adapters lives in `config/jurisdictions.js`.
 
-| Code | Description       | Base URL                       | Search URL                                 |
-| ---- | ----------------- | ------------------------------ | ------------------------------------------ |
-| `ee` | Estonia (default) | https://ariregister.rik.ee     | https://ariregister.rik.ee/eng             |
-| `lv` | Latvia            | https://www.ur.gov.lv          | https://www.ur.gov.lv/lv/search            |
-| `lt` | Lithuania         | https://www.registrucentras.lt | https://www.registrucentras.lt/jar/paieska |
-| `fi` | Finland           | https://www.ytj.fi             | https://www.ytj.fi/en/yrityshaku           |
+| Code | Country   | Status    | Registry URL                      |
+| ---- | --------- | --------- | --------------------------------- |
+| `ee` | Estonia   | **Full**  | https://ariregister.rik.ee        |
+| `lv` | Latvia    | Stub      | https://www.ur.gov.lv             |
+| `lt` | Lithuania | Stub      | https://www.registrucentras.lt    |
+| `fi` | Finland   | Stub      | https://www.ytj.fi                |
+| `se` | Sweden    | Stub      | https://www.bolagsverket.se       |
+| `dk` | Denmark   | Stub      | https://datacvr.virk.dk           |
+| `no` | Norway    | Stub      | https://www.brreg.no              |
+| `de` | Germany   | Stub      | https://www.handelsregister.de    |
+| `pl` | Poland    | Stub      | https://ekrs.ms.gov.pl            |
 
-Adding or overriding a code is as easy as editing that file and declaring a new `baseUrl` / `searchUrl` pair; the scraper automatically picks up the new code as soon as you redeploy.
+**Full** — all adapter methods implemented, tested, and passing preflight.
+**Stub** — adapter registered, URLs and selectors defined, HTML extraction not yet implemented. Calling `/getCompleteInfo` for a stub jurisdiction will return a 500 error.
 
 ---
 
@@ -435,6 +547,6 @@ All errors follow the same shape:
 | ------ | --------------------------------------------------------------------------------- |
 | `400`  | Missing or invalid request body field                                             |
 | `404`  | No results found (`/getAutocompleteSuggestions` only)                             |
-| `500`  | Scraper error (network, selector change, timeout)                                 |
+| `500`  | Scraper error (network, selector change, timeout, stub adapter called)            |
 
 > **Note:** `POST /getCompanyByNameOrNumber` always returns `200` — zero results are expressed as `{ "count": 0, "results": [] }` rather than a `404`.

@@ -35,13 +35,38 @@ export class BaseJurisdictionAdapter {
   }
 
   /**
-   * Parse a company detail page HTML.
+   * Parse a company detail page HTML into raw sections.
+   * Used internally by extractCompanyResult.
    * @param {string} html
-   * @returns {object}
+   * @returns {Array<{ title: string, fields: object, content: string, links: object[] }>}
    */
   // eslint-disable-next-line no-unused-vars
   extractCompanyDetail(html) {
     throw new Error("extractCompanyDetail not implemented");
+  }
+
+  /**
+   * Given a live Playwright page and its HTML, extract the full structured
+   * company result object. The page is provided for JS-rendered tables that
+   * are not present in the static HTML snapshot.
+   *
+   * @param {import('playwright').Page} page
+   * @param {string} html
+   * @param {string} companyName  title already extracted by the caller
+   * @returns {Promise<object>}
+   */
+  // eslint-disable-next-line no-unused-vars
+  async extractCompanyResult(page, html, companyName) {
+    throw new Error("extractCompanyResult not implemented");
+  }
+
+  /**
+   * CSS selector (or null) the scraper should wait for before extracting HTML.
+   * Override per jurisdiction if the detail page uses a different container.
+   * @returns {string}
+   */
+  get detailReadySelector() {
+    return ".card-body";
   }
 
   /**

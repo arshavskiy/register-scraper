@@ -13,7 +13,7 @@ export class LVAdapter extends BaseJurisdictionAdapter {
 
   get selectors() {
     return {
-      searchInput: "input[name='query']",
+      searchInput: "input[name='search']",
       searchButton: "button[type='submit']",
       autocompleteDropdown: null,
       autocompleteItem: null,

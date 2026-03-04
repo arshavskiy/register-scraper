@@ -154,6 +154,86 @@ export class EEAdapter extends BaseJurisdictionAdapter {
     return sections;
   }
 
+  get detailReadySelector() {
+    return ".card-body";
+  }
+
+  async extractCompanyResult(page, html, companyName) {
+    const sections = this.extractCompanyDetail(html);
+    const general = sections.find((s) => s.title === "General information");
+    const vat     = sections.find((s) => s.title === "VAT information");
+
+    // Officers — rendered in #representativesTable by JavaScript
+    const officers = await page
+      .$$eval("#representativesTable tbody tr", (rows) =>
+        rows.map((row) => {
+          const cells = [...row.querySelectorAll("td")].map((td) => td.textContent?.trim() ?? "");
+          return { name: cells[0], position: cells[2], entityType: null };
+        }),
+      )
+      .catch(() => []);
+
+    // Shareholders — table whose first header is "Participation"
+    const shareholders = await page
+      .$$eval("table", (tables) => {
+        for (const table of tables) {
+          const headers = [...(table.querySelector("thead")?.querySelectorAll("th") ?? [])].map(
+            (th) => th.textContent?.trim(),
+          );
+          if (headers[0] !== "Participation") continue;
+          return [...table.querySelectorAll("tbody tr")].map((row) => {
+            const cells = [...row.querySelectorAll("td")].map(
+              (td) => td.textContent?.trim().replace(/\s+/g, " ") ?? "",
+            );
+            const contribMatch = cells[1]?.match(/^[\d.,]+\s+EUR\s+(.*)/);
+            return {
+              name: cells[2] ?? "",
+              shares: cells[0] ?? "",
+              shareCount: null,
+              entityType: null,
+              type_of_control: contribMatch?.[1]?.trim() ?? cells[1] ?? "",
+            };
+          });
+        }
+        return [];
+      })
+      .catch(() => []);
+
+    // Beneficial owners — #beneficiaries-table
+    const ultimate_beneficial_owners = await page
+      .$$eval("#beneficiaries-table tbody tr", (rows) =>
+        rows.map((row) => {
+          const cells = [...row.querySelectorAll("td")].map(
+            (td) => td.textContent?.trim().replace(/\s+/g, " ") ?? "",
+          );
+          return { name: cells[0], position: null, entityType: null, type_of_control: cells[2] };
+        }),
+      )
+      .catch(() => []);
+
+    const fieldMap = {
+      registryCode: process.env.FIELD_REGISTRY_CODE || "Registry code",
+      vatNumber:    process.env.FIELD_VAT_NUMBER    || "VAT number",
+      incorporated: process.env.FIELD_INCORPORATED  || "Registered",
+      legalForm:    process.env.FIELD_LEGAL_FORM    || "Legal form",
+      status:       process.env.FIELD_STATUS        || "Status",
+    };
+
+    return {
+      company_name:              companyName,
+      company_number:            general?.fields[fieldMap.registryCode] ?? "",
+      jurisdiction_ident:        vat?.fields[fieldMap.vatNumber] ?? "",
+      incorporation_date:        general?.fields[fieldMap.incorporated] ?? "",
+      dissolution_date:          "",
+      company_type:              general?.fields[fieldMap.legalForm] ?? "",
+      current_status:            general?.fields[fieldMap.status] ?? "",
+      more_info_available:       sections.length > 0,
+      ultimate_beneficial_owners,
+      officers,
+      shareholders,
+    };
+  }
+
   async extractAutocompleteSuggestions(page) {
     const { autocompleteDropdown, autocompleteItem } = this.selectors;
     try {
