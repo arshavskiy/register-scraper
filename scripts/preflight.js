@@ -32,7 +32,7 @@ console.log("\n[preflight] 1. Environment variables");
 
 const REQUIRED_ENV = [
   // These all have in-code defaults, but warn if .env is missing entirely
-  { key: "PORT",             default: "3000" },
+  { key: "PORT",             default: "6666" },
   { key: "BROWSER_HEADLESS", default: "true" },
   { key: "DATA_FOLDER",      default: "../data" },
 ];
