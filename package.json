@@ -12,7 +12,12 @@
     "preflight": "node scripts/preflight.js",
     "build": "node scripts/preflight.js && node scripts/build.js",
     "docker:build": "docker build -t register-scraper .",
-    "docker:run": "docker run --env-file .env -p ${PORT:-3000}:${PORT:-3000} -v \"$(pwd)/../data\":/data register-scraper"
+    "docker:run": "docker run --env-file .env -p ${PORT:-3000}:${PORT:-3000} -v \"$(pwd)/../data\":/data register-scraper",
+    "pm2:start": "pm2 start dist/server.js --name register-scraper",
+    "pm2:stop": "pm2 stop register-scraper",
+    "pm2:restart": "pm2 restart register-scraper",
+    "pm2:logs": "pm2 logs register-scraper",
+    "pm2:status": "pm2 status"
   },
   "keywords": [],
   "author": "",
