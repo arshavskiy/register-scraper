@@ -34,15 +34,6 @@ export async function handleCompanySearch(req, res) {
   try {
     const raw = await getCompanyByNameOrNumber(query, jCode);
 
-    if (raw.length === 0) {
-      console.log("[companyController] No results found", {
-        query,
-        ...jurisdictionLog,
-      });
-      res.status(404).json({ error: "No companies found.", query });
-      return;
-    }
-
     const results = raw.map((r) => ({
       jurisdiction_code: jCode,
       company_name: r.name,
@@ -56,7 +47,7 @@ export async function handleCompanySearch(req, res) {
       query,
       resultsCount: results.length,
     });
-    res.json(results);
+    res.json({ query, count: results.length, results });
   } catch (err) {
     console.error("[companyController] getCompanyByNameOrNumber Error:", err);
     res

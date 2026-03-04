@@ -3,7 +3,7 @@ import * as cheerio from "cheerio";
 import fs from "fs";
 import path from "path";
 import {fileURLToPath} from "url";
-import JURISDICTION_ENDPOINTS from "./config/jurisdictions.js";
+import JURISDICTION_ENDPOINTS from "../config/jurisdictions.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -156,17 +156,18 @@ function extractAllSections(html, wantedSections, baseUrl) {
 function extractSearchResults(html, baseUrl) {
     const $ = cheerio.load(html);
     const results = [];
-    
+
+    // Primary layout: card-based results (exact match or small result sets)
     $("a.h2.text-primary").each((_, a) => {
         const name = $(a).text().trim();
         const href = $(a).attr("href") || "";
         const url = normalizeUrl(href, baseUrl) || "";
-        
+
         const codeMatch = href.match(/\/company\/(\d+)\//);
         let registryCode = codeMatch ? codeMatch[1] : "";
         let status = "";
         let address = "";
-        
+
         const cardBody = $(a).closest(".card-body");
         cardBody.find(".row").each((_, row) => {
             const label = $(row).find(".col-md-2").text().trim();
@@ -179,10 +180,50 @@ function extractSearchResults(html, baseUrl) {
             if (label === "Status") status = value;
             if (label === "Address") address = value;
         });
-        
+
         if (name) results.push({name, registryCode, status, address, url});
     });
-    
+
+    if (results.length > 0) return results;
+
+    // Fallback layout: table-based results (large result sets)
+    $("table tbody tr").each((_, tr) => {
+        const cells = $(tr).find("td");
+        if (cells.length < 2) return;
+
+        // Find the link cell — usually contains the company name as an anchor
+        let name = "";
+        let href = "";
+        let url = "";
+        let registryCode = "";
+        let status = "";
+        let address = "";
+
+        cells.each((_, td) => {
+            const anchor = $(td).find("a").first();
+            if (anchor.length && !name) {
+                name = anchor.text().trim();
+                href = anchor.attr("href") || "";
+                url = normalizeUrl(href, baseUrl) || "";
+                const codeMatch = href.match(/\/company\/(\d+)\//);
+                if (codeMatch) registryCode = codeMatch[1];
+            }
+            const text = $(td).text().replace(/\s+/g, " ").trim();
+            if (/^\d{8}$/.test(text) && !registryCode) registryCode = text;
+            if (/registered|active|deleted|liquidation/i.test(text) && !status) status = text;
+        });
+
+        // If we couldn't extract the registry code from the URL, try text cells
+        if (!registryCode) {
+            cells.each((_, td) => {
+                const text = $(td).text().replace(/\s+/g, " ").trim();
+                if (/^\d{7,10}$/.test(text)) { registryCode = text; return false; }
+            });
+        }
+
+        if (name) results.push({name, registryCode, status, address, url});
+    });
+
     return results;
 }
 
@@ -273,9 +314,10 @@ async function getCompanyByNameOrNumber(query, jurisdictionCode = DEFAULT_JURISD
         console.log("[getCompanyByNameOrNumber] Search executed, waiting for results...", normalizedJurisdiction,);
         
         try {
-            await page.waitForSelector("a.h2.text-primary", {
-                state: "attached", timeout: 5000,
-            });
+            await Promise.any([
+                page.waitForSelector("a.h2.text-primary", {state: "attached", timeout: 5000}),
+                page.waitForSelector("table tbody tr", {state: "attached", timeout: 5000}),
+            ]);
             console.log("[getCompanyByNameOrNumber] Results found on page");
         } catch {
             console.log("[getCompanyByNameOrNumber] No results found (timeout waiting for results)", normalizedJurisdiction,);

@@ -183,6 +183,10 @@ data/
 
 Submit a full search and return all matching companies from the results page. Saves a full-page screenshot and JSON to `data/YYYY-MM-DD/`.
 
+Handles both result layouts used by the Estonian registry:
+- **Card layout** — exact matches or small result sets
+- **Table layout** — broad queries that return many results (e.g. `"OPERATIONS"`)
+
 **Request**
 
 ```http
@@ -205,23 +209,43 @@ At least one of `company_name` or `company_number` must be provided. If both are
 
 **Response — 200 OK**
 
+Always returns an object with `query`, `count`, and `results` array — regardless of how many matches were found (including zero).
+
 ```json
-[
-  {
-    "jurisdiction_code": "ee",
-    "company_name": "Bolt Operations OÜ",
-    "company_number": "14532901",
-    "address": "Harju maakond, Tallinn, Kesklinna linnaosa, Vana-Lõuna tn 15, 10134",
-    "status": "Entered into the register (25.07.2018)",
-    "url": "https://ariregister.rik.ee/eng/company/14532901/..."
-  }
-]
+{
+  "query": "BOLT OPERATIONS OÜ",
+  "count": 1,
+  "results": [
+    {
+      "jurisdiction_code": "ee",
+      "company_name": "Bolt Operations OÜ",
+      "company_number": "14532901",
+      "address": "Harju maakond, Tallinn, Kesklinna linnaosa, Vana-Lõuna tn 15, 10134",
+      "status": "Entered into the register (25.07.2018)",
+      "url": "https://ariregister.rik.ee/eng/company/14532901/..."
+    }
+  ]
+}
 ```
 
-**Response — 404 Not Found**
+**Broad query example — many results**
 
 ```json
-{ "error": "No companies found.", "query": "..." }
+{
+  "query": "OPERATIONS",
+  "count": 47,
+  "results": [
+    { "jurisdiction_code": "ee", "company_name": "Bolt Operations OÜ", "company_number": "14532901", ... },
+    { "jurisdiction_code": "ee", "company_name": "Elmo Operations OÜ", "company_number": "16123456", ... },
+    ...
+  ]
+}
+```
+
+**No results**
+
+```json
+{ "query": "XYZNOTFOUND", "count": 0, "results": [] }
 ```
 
 **Saved files**
@@ -407,8 +431,10 @@ All errors follow the same shape:
 { "error": "Human-readable message.", "details": "Optional stack or cause." }
 ```
 
-| Status | Meaning                                           |
-| ------ | ------------------------------------------------- |
-| `400`  | Missing or invalid request body field             |
-| `404`  | No results found for the given query              |
-| `500`  | Scraper error (network, selector change, timeout) |
+| Status | Meaning                                                                           |
+| ------ | --------------------------------------------------------------------------------- |
+| `400`  | Missing or invalid request body field                                             |
+| `404`  | No results found (`/getAutocompleteSuggestions` only)                             |
+| `500`  | Scraper error (network, selector change, timeout)                                 |
+
+> **Note:** `POST /getCompanyByNameOrNumber` always returns `200` — zero results are expressed as `{ "count": 0, "results": [] }` rather than a `404`.
